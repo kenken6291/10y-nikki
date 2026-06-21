@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>日記 | 10年日記</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<header class="site-header">
+  <a href="index.html" class="site-logo">📓 10年日記</a>
+  <div id="nav-login" class="nav-links">
+    <a href="guide.html" class="nav-link-item">📖 使い方</a>
+    <a href="index.html" class="btn-secondary" style="font-size:0.85rem;padding:0.4rem 0.9rem;">ログイン</a>
+  </div>
+  <div id="nav-user" class="nav-user" style="display:none">
+    <a href="index.html" class="nav-link-item">🏠 ホーム</a>
+    <a href="events.html" class="nav-link-item">🎪 イベント</a>
+    <a href="profile.html" class="nav-link-item">👤 マイページ</a>
+    <a href="guide.html" class="nav-link-item">❓ 使い方</a>
+    <span id="nav-nickname" class="nav-nickname"></span>
+    <button class="btn-logout" onclick="handleLogout()">ログアウト</button>
+    <a id="nav-admin" href="admin.html" style="display:none;color:var(--light-amber);font-size:0.85rem;text-decoration:none;">⚙️</a>
+  </div>
+</header>
+
+<nav class="bottom-nav">
+  <a href="index.html"><span class="icon">🏠</span>ホーム</a>
+  <a href="diary.html" class="active"><span class="icon">📖</span>日記</a>
+  <a href="events.html"><span class="icon">🎪</span>イベント</a>
+  <a href="profile.html"><span class="icon">👤</span>マイページ</a>
+  <a href="index.html"><span class="icon">🔑</span>ログイン</a>
+</nav>
+
+<div class="page-wrapper">
+  <!-- ログイン促進（未ログイン時） -->
+  <div id="login-prompt-section" class="form-card" style="display:none;text-align:center;padding:2rem;">
+    <p style="font-size:1.1rem;margin-bottom:1rem;">日記を書くにはログインが必要です</p>
+    <a href="index.html" class="btn-primary">ログイン / 新規登録</a>
+  </div>
+
+  <!-- ログイン済みコンテンツ -->
+  <div id="diary-logged-in" style="display:none">
+    <div class="tab-bar">
+      <button class="tab-btn active" onclick="switchTab('post')">✏️ 新規投稿</button>
+      <button class="tab-btn" onclick="switchTab('mine')">📚 マイ日記</button>
+      <button class="tab-btn" onclick="switchTab('timeline')">📅 年表</button>
+    </div>
+
+    <!-- ===== 新規投稿 ===== -->
+    <div id="tab-post" class="tab-content">
+      <div class="form-card">
+        <h2>✏️ 今日の日記</h2>
+        <form id="diary-form" onsubmit="submitDiary(event)">
+          <div class="form-group">
+            <label>タイトル <span style="color:#b00">*</span></label>
+            <input type="text" id="diary-title" maxlength="100" placeholder="今日のタイトルを…" required>
+          </div>
+          <div class="form-group">
+            <label>本文 <span style="color:#b00">*</span></label>
+            <textarea id="diary-content" rows="10" placeholder="今日はどんな一日でしたか？" required></textarea>
+          </div>
+          <div class="form-group">
+            <label>今日の気分</label>
+            <div class="mood-selector">
+              <button type="button" class="mood-btn selected" data-mood="😊" onclick="selectMoodDiary(this)">😊</button>
+              <button type="button" class="mood-btn" data-mood="😢" onclick="selectMoodDiary(this)">😢</button>
+              <button type="button" class="mood-btn" data-mood="😤" onclick="selectMoodDiary(this)">😤</button>
+              <button type="button" class="mood-btn" data-mood="😴" onclick="selectMoodDiary(this)">😴</button>
+              <button type="button" class="mood-btn" data-mood="🤔" onclick="selectMoodDiary(this)">🤔</button>
+            </div>
+            <input type="hidden" id="diary-mood" value="😊">
+          </div>
+          <div class="form-group">
+            <label>タグ（カンマ区切り）</label>
+            <input type="text" id="diary-tags" placeholder="旅行, 日常, 仕事, 食べ物…">
+          </div>
+          <div class="form-group">
+            <label class="checkbox-row">
+              <input type="checkbox" id="diary-public" checked>
+              🌐 みんなに公開する
+            </label>
+          </div>
+          <div class="form-footer">
+            <button type="submit" id="submit-diary-btn" class="btn-primary">📝 投稿する</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- ===== マイ日記 ===== -->
+    <div id="tab-mine" class="tab-content" style="display:none">
+      <h2 class="section-title">📚 マイ日記</h2>
+      <div id="my-diaries" class="diary-feed">
+        <div class="loading-msg"><span class="loading-spinner"></span>読み込み中...</div>
+      </div>
+    </div>
+
+    <!-- ===== 年表 ===== -->
+    <div id="tab-timeline" class="tab-content" style="display:none">
+      <h2 class="section-title">📅 わたしの年表</h2>
+      <p style="color:#7a5c4a;font-size:0.88rem;margin-bottom:1.5rem;">日記の記録が年ごとに並びます。10年分の歩みを振り返りましょう。</p>
+      <div id="timeline-container" class="timeline-container">
+        <div class="loading-msg"><span class="loading-spinner"></span>年表を開いています...</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== 日記詳細モーダル ===== -->
+<div class="modal-overlay" id="diary-modal" onclick="if(event.target===this)closeModal()">
+  <div class="modal-box">
+    <button class="modal-close" onclick="closeModal()">✕</button>
+    <div id="modal-body"></div>
+  </div>
+</div>
+
+<!-- ===== 編集モーダル ===== -->
+<div class="modal-overlay" id="edit-modal" onclick="if(event.target===this)document.getElementById('edit-modal').style.display='none'">
+  <div class="modal-box">
+    <button class="modal-close" onclick="document.getElementById('edit-modal').style.display='none'">✕</button>
+    <h2 class="modal-title">📝 日記を編集</h2>
+    <div class="form-group">
+      <label>タイトル</label>
+      <input type="text" id="edit-title" maxlength="100">
+    </div>
+    <div class="form-group">
+      <label>本文</label>
+      <textarea id="edit-content" rows="8"></textarea>
+    </div>
+    <div class="form-group">
+      <label>気分</label>
+      <div class="mood-selector">
+        <button type="button" class="mood-btn" data-mood="😊" onclick="selectMood(this,'edit-mood')">😊</button>
+        <button type="button" class="mood-btn" data-mood="😢" onclick="selectMood(this,'edit-mood')">😢</button>
+        <button type="button" class="mood-btn" data-mood="😤" onclick="selectMood(this,'edit-mood')">😤</button>
+        <button type="button" class="mood-btn" data-mood="😴" onclick="selectMood(this,'edit-mood')">😴</button>
+        <button type="button" class="mood-btn" data-mood="🤔" onclick="selectMood(this,'edit-mood')">🤔</button>
+      </div>
+      <input type="hidden" id="edit-mood" value="😊">
+    </div>
+    <div class="form-group">
+      <label>タグ</label>
+      <input type="text" id="edit-tags">
+    </div>
+    <div class="form-group">
+      <label class="checkbox-row">
+        <input type="checkbox" id="edit-public" checked> 公開する
+      </label>
+    </div>
+    <div class="form-footer">
+      <button class="btn-secondary" onclick="document.getElementById('edit-modal').style.display='none'">キャンセル</button>
+      <button class="btn-primary" onclick="submitEdit()">更新する</button>
+    </div>
+  </div>
+</div>
+
+<script src="js/config.js"></script>
+<script src="js/auth.js"></script>
+<script src="js/diary.js"></script>
+<script>
+let activeTab = 'post';
+
+function switchTab(tab) {
+  document.querySelectorAll('.tab-btn').forEach((btn,i) => {
+    btn.classList.toggle('active', ['post','mine','timeline'][i] === tab);
+  });
+  document.querySelectorAll('.tab-content').forEach(el => el.style.display = 'none');
+  document.getElementById('tab-' + tab).style.display = 'block';
+  activeTab = tab;
+  if (tab === 'mine') loadMyDiaries();
+  if (tab === 'timeline') renderTimeline();
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  updateNav();
+  enforcePasswordChangeIfNeeded();
+  if (Auth.isLoggedIn()) {
+    document.getElementById('login-prompt-section').style.display = 'none';
+    document.getElementById('diary-logged-in').style.display = 'block';
+  } else {
+    document.getElementById('login-prompt-section').style.display = 'block';
+    document.getElementById('diary-logged-in').style.display = 'none';
+  }
+});
+</script>
+</body>
+</html>

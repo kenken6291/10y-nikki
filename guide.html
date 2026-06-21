@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>使い方ガイド | 10年日記</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<header class="site-header">
+  <a href="index.html" class="site-logo">📓 10年日記</a>
+  <div id="nav-login" class="nav-links">
+    <a href="index.html" class="btn-secondary" style="font-size:0.85rem;padding:0.4rem 0.9rem;">トップへ</a>
+  </div>
+  <div id="nav-user" class="nav-user" style="display:none">
+    <a href="index.html" class="nav-link-item">🏠 ホーム</a>
+    <a href="diary.html" class="nav-link-item">📖 日記</a>
+    <a href="events.html" class="nav-link-item">🎪 イベント</a>
+    <a href="profile.html" class="nav-link-item">👤 マイページ</a>
+    <span id="nav-nickname" class="nav-nickname"></span>
+    <button class="btn-logout" onclick="handleLogout()">ログアウト</button>
+    <a id="nav-admin" href="admin.html" style="display:none;color:var(--light-amber);font-size:0.85rem;text-decoration:none;">⚙️</a>
+  </div>
+</header>
+
+<nav class="bottom-nav">
+  <a href="index.html"><span class="icon">🏠</span>ホーム</a>
+  <a href="diary.html"><span class="icon">📖</span>日記</a>
+  <a href="events.html"><span class="icon">🎪</span>イベント</a>
+  <a href="profile.html"><span class="icon">👤</span>マイページ</a>
+  <a href="index.html"><span class="icon">🔑</span>ログイン</a>
+</nav>
+
+<div class="page-wrapper">
+  <h1 class="section-title">❓ 使い方ガイド</h1>
+  <p style="font-size:0.9rem;color:#7a5c4a;margin-bottom:1.5rem;">10年日記の基本的な使い方をまとめました。気になる項目をタップしてください。</p>
+
+  <div class="guide-toc">
+    <a href="#g-register">📝 会員登録</a>
+    <a href="#g-password">🔑 パスワード</a>
+    <a href="#g-diary">📖 日記の書き方</a>
+    <a href="#g-timeline">📅 年表</a>
+    <a href="#g-events-join">🎪 イベント参加</a>
+    <a href="#g-events-create">🎊 イベント企画</a>
+    <a href="#g-notify">📧 通知設定</a>
+    <a href="#g-terms">⚠️ 免責事項</a>
+    <a href="#g-contact">💌 お問い合わせ</a>
+  </div>
+
+  <section class="guide-section" id="g-register">
+    <h2>📝 会員登録の流れ</h2>
+    <ol>
+      <li>トップページの「新規登録」から、メールアドレス・ニックネーム・生まれた年（任意）を入力します。</li>
+      <li>免責事項・注意事項を確認し、同意のチェックを入れて登録します。</li>
+      <li>入力したメールアドレス宛に「仮パスワード」が届きます。</li>
+      <li>会員番号（登録したメールアドレス）と仮パスワードでログインします。</li>
+      <li>ログイン後、案内に従って新しいパスワードに変更してください（変更が終わるまで他の機能は使えません）。</li>
+    </ol>
+    <p style="margin-top:0.5rem;">※ パスワードは登録時にご自身で決めるのではなく、仮パスワードがメールで届く方式です。</p>
+  </section>
+
+  <section class="guide-section" id="g-password">
+    <h2>🔑 パスワードについて</h2>
+    <p><strong>パスワードを忘れた場合：</strong></p>
+    <ol>
+      <li>ログイン画面の「パスワードをお忘れの方はこちら」をタップします。</li>
+      <li>会員番号（登録メールアドレス）を入力して送信します。</li>
+      <li>新しい仮パスワードがメールで届きます。</li>
+      <li>ログイン後、新しいパスワードに変更してください。</li>
+    </ol>
+    <p style="margin-top:0.5rem;"><strong>パスワードの変更：</strong>マイページの「パスワード変更」からいつでも変更できます。</p>
+    <p style="margin-top:0.5rem;">パスワード入力欄の👁️アイコンをタップすると、入力内容の表示・非表示を切り替えられます。</p>
+  </section>
+
+  <section class="guide-section" id="g-diary">
+    <h2>📖 日記の書き方</h2>
+    <ul>
+      <li>「日記」ページの「新規投稿」タブから、タイトル・本文・気分・タグを入力して投稿できます。</li>
+      <li>「みんなに公開する」のチェックを外すと、自分だけが見られる非公開の日記になります。</li>
+      <li>公開した日記には他の会員が❤️いいねや💬コメントを付けられます。</li>
+      <li>「マイ日記」タブから自分の投稿の編集・削除ができます。</li>
+    </ul>
+  </section>
+
+  <section class="guide-section" id="g-timeline">
+    <h2>📅 年表機能</h2>
+    <p>「日記」ページの「年表」タブでは、自分が書いた日記が年ごとにまとめて表示されます。10年分の歩みを振り返るのに便利です。</p>
+  </section>
+
+  <section class="guide-section" id="g-events-join">
+    <h2>🎪 イベントへの参加・不参加</h2>
+    <ul>
+      <li>イベント一覧は新しく登録されたものから順に表示されます。</li>
+      <li>イベントをタップすると詳細・参加者一覧が見られます。</li>
+      <li>「✅ 参加する」で参加表明、「❌ 不参加にする」でキャンセルできます。</li>
+      <li>参加者一覧には、ニックネームと（登録していれば）連絡用SNSが表示されます。</li>
+      <li>募集期限を過ぎる、または定員に達すると自動的に「募集終了」と表示され、参加できなくなります。</li>
+    </ul>
+  </section>
+
+  <section class="guide-section" id="g-events-create">
+    <h2>🎊 イベントの企画・編集・削除</h2>
+    <ul>
+      <li>ログイン後、イベントページの「イベントを企画する」から作成できます。</li>
+      <li>定員（参加人数の上限）と募集期限を任意で設定できます。</li>
+      <li>自分が作成したイベントは編集・削除ができます。</li>
+      <li>管理者を介さず、会員どうし自由にイベントを企画・連絡できます。</li>
+      <li>イベント詳細の掲示板から参加者へメッセージを送れます（参加者全員へのメール通知も選べます）。</li>
+    </ul>
+  </section>
+
+  <section class="guide-section" id="g-notify">
+    <h2>📧 通知設定の変更</h2>
+    <p>マイページの「メール通知設定」から、いいね・コメント・イベント・10年前リマインドの各通知を個別にON/OFFできます。</p>
+  </section>
+
+  <section class="guide-section" id="g-terms">
+    <h2>⚠️ 免責事項・注意事項</h2>
+    <p>当サービスはボランティアによる無料運営です。会員間のトラブルについて運営は一切関与しません。ご利用前に必ず内容をご確認ください。</p>
+    <p style="margin-top:0.5rem;"><a href="terms.html" target="_blank" style="color:var(--amber);font-weight:700;">免責事項・注意事項の全文を見る ↗</a></p>
+  </section>
+
+  <section class="guide-section" id="g-contact">
+    <h2>💌 困ったときは</h2>
+    <p>当サービスはボランティアにより運営されています。会員間のトラブルについては当事者間での解決をお願いしておりますが、サイトの不具合等にお気づきの場合は、運営までお知らせください。</p>
+  </section>
+
+  <div class="text-center mt-3" style="margin-bottom:2rem;">
+    <a href="index.html" class="btn-primary">トップページに戻る</a>
+  </div>
+</div>
+
+<script src="js/config.js"></script>
+<script src="js/auth.js"></script>
+<script>
+document.addEventListener('DOMContentLoaded', () => { updateNav(); });
+</script>
+</body>
+</html>

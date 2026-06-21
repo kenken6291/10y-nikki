@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>マイページ | 10年日記</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<header class="site-header">
+  <a href="index.html" class="site-logo">📓 10年日記</a>
+  <div id="nav-login" class="nav-links">
+    <a href="guide.html" class="nav-link-item">📖 使い方</a>
+    <a href="index.html" class="btn-secondary" style="font-size:0.85rem;padding:0.4rem 0.9rem;">ログイン</a>
+  </div>
+  <div id="nav-user" class="nav-user" style="display:none">
+    <a href="index.html" class="nav-link-item">🏠 ホーム</a>
+    <a href="diary.html" class="nav-link-item">📖 日記</a>
+    <a href="events.html" class="nav-link-item">🎪 イベント</a>
+    <a href="guide.html" class="nav-link-item">❓ 使い方</a>
+    <span id="nav-nickname" class="nav-nickname"></span>
+    <button class="btn-logout" onclick="handleLogout()">ログアウト</button>
+    <a id="nav-admin" href="admin.html" style="display:none;color:var(--light-amber);font-size:0.85rem;text-decoration:none;">⚙️</a>
+  </div>
+</header>
+
+<nav class="bottom-nav">
+  <a href="index.html"><span class="icon">🏠</span>ホーム</a>
+  <a href="diary.html"><span class="icon">📖</span>日記</a>
+  <a href="events.html"><span class="icon">🎪</span>イベント</a>
+  <a href="profile.html" class="active"><span class="icon">👤</span>マイページ</a>
+  <a href="index.html"><span class="icon">🔑</span>ログイン</a>
+</nav>
+
+<div class="page-wrapper">
+
+  <!-- 未ログイン時 -->
+  <div id="not-logged-in" class="form-card" style="display:none;text-align:center;padding:2.5rem;">
+    <p style="font-size:1.1rem;margin-bottom:1rem;">マイページを見るにはログインが必要です</p>
+    <a href="index.html" class="btn-primary">ログイン / 新規登録</a>
+  </div>
+
+  <!-- ===== 強制パスワード変更画面（v3新規） ===== -->
+  <div id="force-change-section" class="form-card force-change-box" style="display:none;">
+    <h2>🔐 パスワードの変更が必要です</h2>
+    <p style="font-size:0.9rem;color:#7a5c4a;margin-bottom:1.25rem;line-height:1.7;">
+      仮パスワードでログイン中です。安全のため、新しいパスワードを設定してください。<br>
+      設定が完了するまで、他の機能はご利用いただけません。
+    </p>
+    <div class="form-group">
+      <label>現在の仮パスワード</label>
+      <div class="password-input-wrap">
+        <input type="password" id="force-current-pw">
+        <button type="button" class="pw-toggle-btn" onclick="togglePasswordVisibility('force-current-pw', this)">👁️</button>
+      </div>
+    </div>
+    <div class="form-group">
+      <label>新しいパスワード（8文字以上）</label>
+      <div class="password-input-wrap">
+        <input type="password" id="force-new-pw">
+        <button type="button" class="pw-toggle-btn" onclick="togglePasswordVisibility('force-new-pw', this)">👁️</button>
+      </div>
+    </div>
+    <button class="btn-primary" style="width:100%" onclick="submitForcePasswordChange()">パスワードを変更して続ける</button>
+  </div>
+
+  <!-- ===== ログイン済み・通常表示 ===== -->
+  <div id="profile-content" style="display:none">
+
+    <!-- プロフィールヘッダー -->
+    <div class="profile-header form-card" style="padding:2rem 1.5rem;">
+      <div class="profile-avatar" id="profile-avatar">📓</div>
+      <div class="profile-name" id="profile-name"></div>
+      <div class="profile-gen" id="profile-gen"></div>
+      <div class="profile-memberid">会員番号（ログインID）: <strong id="p-member-id-display"></strong></div>
+    </div>
+
+    <!-- プロフィール編集 -->
+    <div class="form-card mt-2">
+      <h2>👤 プロフィール編集</h2>
+      <div class="form-group">
+        <label>ニックネーム</label>
+        <input type="text" id="p-nickname" maxlength="20">
+      </div>
+      <div class="form-group">
+        <label>自己紹介</label>
+        <textarea id="p-profile" rows="4" placeholder="どんな人ですか？日記のテーマや趣味など…"></textarea>
+      </div>
+      <div class="form-group">
+        <label>生まれた年</label>
+        <input type="number" id="p-birthyear" min="1940" max="2015" placeholder="例: 1990">
+      </div>
+      <div class="form-group">
+        <label>連絡用SNS（任意・イベント参加者にのみ公開されます）</label>
+        <input type="text" id="p-sns" placeholder="例: Instagram @your_id / LINE ID: xxxx">
+      </div>
+      <div class="form-footer">
+        <button class="btn-primary" onclick="saveProfile()">プロフィールを保存</button>
+      </div>
+    </div>
+
+    <!-- パスワード変更（v3新規） -->
+    <div class="form-card mt-2">
+      <h2>🔑 パスワード変更</h2>
+      <div class="form-group">
+        <label>現在のパスワード</label>
+        <div class="password-input-wrap">
+          <input type="password" id="pw-current">
+          <button type="button" class="pw-toggle-btn" onclick="togglePasswordVisibility('pw-current', this)">👁️</button>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>新しいパスワード（8文字以上）</label>
+        <div class="password-input-wrap">
+          <input type="password" id="pw-new">
+          <button type="button" class="pw-toggle-btn" onclick="togglePasswordVisibility('pw-new', this)">👁️</button>
+        </div>
+      </div>
+      <div class="form-footer">
+        <button class="btn-primary" onclick="changeMyPassword()">パスワードを変更する</button>
+      </div>
+    </div>
+
+    <!-- メール通知設定 -->
+    <div class="form-card mt-2 notify-settings">
+      <h2>📧 メール通知設定</h2>
+      <p style="font-size:0.85rem;color:#7a5c4a;margin-bottom:1rem;">GASオーナーのGmailから送信されます</p>
+
+      <label class="toggle-row">
+        <span>❤️ いいねを受け取ったとき</span>
+        <input type="checkbox" id="notifyLikes">
+      </label>
+      <label class="toggle-row">
+        <span>💬 コメントを受け取ったとき</span>
+        <input type="checkbox" id="notifyComments">
+      </label>
+      <label class="toggle-row">
+        <span>📅 イベント更新・参加があったとき</span>
+        <input type="checkbox" id="notifyEvents">
+      </label>
+      <label class="toggle-row" style="border-bottom:none">
+        <span>📖 10年前の今日の日記リマインド</span>
+        <input type="checkbox" id="notifyReminder">
+      </label>
+
+      <div class="form-footer" style="margin-top:1rem;">
+        <button class="btn-primary" onclick="saveNotifySettings()">通知設定を保存</button>
+      </div>
+    </div>
+
+    <!-- 規約・ログアウト -->
+    <div class="form-card mt-2" style="text-align:center;padding:1.5rem;">
+      <p style="margin-bottom:1rem;"><a href="terms.html" target="_blank" style="color:var(--amber);font-size:0.88rem;">免責事項・注意事項を確認する ↗</a></p>
+      <button class="btn-secondary" style="color:#b00;border-color:#fbb;" onclick="handleLogout()">🚪 ログアウト</button>
+    </div>
+
+  </div>
+</div>
+
+<script src="js/config.js"></script>
+<script src="js/auth.js"></script>
+<script>
+function renderProfileHeader() {
+  const nickname  = Auth.getNickname();
+  const memberId  = Auth.getMemberId();
+  const birthYear = Auth.getBirthYear();
+  document.getElementById('profile-name').textContent = nickname + ' さん';
+  document.getElementById('p-member-id-display').textContent = memberId || '';
+  if (birthYear) {
+    const gen = birthYearToGeneration(birthYear);
+    document.getElementById('profile-gen').textContent = `${birthYear}年生まれ（${gen}）`;
+  }
+  document.getElementById('p-nickname').value  = nickname || '';
+  document.getElementById('p-birthyear').value = birthYear || '';
+}
+
+async function loadMyProfileDetail() {
+  try {
+    const res = await Auth.post({ action: 'getMyProfile', token: Auth.getToken() });
+    if (res.success) {
+      const pr = res.profile;
+      document.getElementById('p-profile').value = pr.profile || '';
+      document.getElementById('p-sns').value      = pr.snsContact || '';
+      document.getElementById('notifyLikes').checked    = pr.notifyLikes !== false;
+      document.getElementById('notifyComments').checked = pr.notifyComments !== false;
+      document.getElementById('notifyEvents').checked   = pr.notifyEvents !== false;
+      document.getElementById('notifyReminder').checked = pr.notifyReminder !== false;
+    }
+  } catch(e) { /* 取得失敗時はデフォルト値のまま */ }
+}
+
+async function saveProfile() {
+  const nickname   = document.getElementById('p-nickname').value.trim();
+  const profile    = document.getElementById('p-profile').value.trim();
+  const birthYear  = document.getElementById('p-birthyear').value;
+  const snsContact = document.getElementById('p-sns').value.trim();
+  if (!nickname) { showToast('ニックネームを入力してください', 'error'); return; }
+  try {
+    const res = await Auth.post({ action: 'updateProfile', token: Auth.getToken(), nickname, profile, birthYear, snsContact });
+    if (res.success) {
+      sessionStorage.setItem('nickname', nickname);
+      if (birthYear) sessionStorage.setItem('birthYear', birthYear);
+      showToast('プロフィールを保存しました ✨');
+      renderProfileHeader();
+      updateNav();
+    } else showToast(res.error || 'エラー', 'error');
+  } catch(e) { showToast('エラー', 'error'); }
+}
+
+async function saveNotifySettings() {
+  const notifyLikes    = document.getElementById('notifyLikes').checked;
+  const notifyComments = document.getElementById('notifyComments').checked;
+  const notifyEvents   = document.getElementById('notifyEvents').checked;
+  const notifyReminder = document.getElementById('notifyReminder').checked;
+  try {
+    const res = await Auth.post({ action: 'updateNotifySettings', token: Auth.getToken(), notifyLikes, notifyComments, notifyEvents, notifyReminder });
+    if (res.success) showToast('通知設定を保存しました 📧');
+    else showToast(res.error || 'エラー', 'error');
+  } catch(e) { showToast('エラー', 'error'); }
+}
+
+// ===== パスワード変更（通常） =====
+async function changeMyPassword() {
+  const currentPassword = document.getElementById('pw-current').value;
+  const newPassword     = document.getElementById('pw-new').value;
+  if (!currentPassword || !newPassword) { showToast('全て入力してください', 'error'); return; }
+  if (newPassword.length < 8) { showToast('新しいパスワードは8文字以上にしてください', 'error'); return; }
+  try {
+    const res = await Auth.post({ action: 'changePassword', token: Auth.getToken(), currentPassword, newPassword });
+    if (res.success) {
+      showToast('パスワードを変更しました ✅');
+      document.getElementById('pw-current').value = '';
+      document.getElementById('pw-new').value = '';
+    } else showToast(res.error || 'エラー', 'error');
+  } catch(e) { showToast('エラー', 'error'); }
+}
+
+// ===== 強制パスワード変更 =====
+async function submitForcePasswordChange() {
+  const currentPassword = document.getElementById('force-current-pw').value;
+  const newPassword     = document.getElementById('force-new-pw').value;
+  if (!currentPassword || !newPassword) { showToast('全て入力してください', 'error'); return; }
+  if (newPassword.length < 8) { showToast('8文字以上にしてください', 'error'); return; }
+  try {
+    const res = await Auth.post({ action: 'changePassword', token: Auth.getToken(), currentPassword, newPassword });
+    if (res.success) {
+      sessionStorage.setItem('mustChangePassword', 'false');
+      showToast('パスワードを変更しました。ようこそ！');
+      document.getElementById('force-change-section').style.display = 'none';
+      document.getElementById('profile-content').style.display = 'block';
+      renderProfileHeader();
+      loadMyProfileDetail();
+    } else showToast(res.error || 'エラー', 'error');
+  } catch(e) { showToast('エラー', 'error'); }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  updateNav();
+  if (!Auth.isLoggedIn()) {
+    document.getElementById('not-logged-in').style.display  = 'block';
+    document.getElementById('profile-content').style.display = 'none';
+    document.getElementById('force-change-section').style.display = 'none';
+    return;
+  }
+
+  if (Auth.mustChangePassword()) {
+    document.getElementById('force-change-section').style.display = 'block';
+    document.getElementById('profile-content').style.display = 'none';
+  } else {
+    document.getElementById('profile-content').style.display = 'block';
+    document.getElementById('force-change-section').style.display = 'none';
+    renderProfileHeader();
+    loadMyProfileDetail();
+  }
+});
+</script>
+</body>
+</html>

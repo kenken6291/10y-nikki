@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>イベント掲示板 | 10年日記</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<header class="site-header">
+  <a href="index.html" class="site-logo">📓 10年日記</a>
+  <div id="nav-login" class="nav-links">
+    <a href="guide.html" class="nav-link-item">📖 使い方</a>
+    <a href="index.html" class="btn-secondary" style="font-size:0.85rem;padding:0.4rem 0.9rem;">ログイン</a>
+  </div>
+  <div id="nav-user" class="nav-user" style="display:none">
+    <a href="index.html" class="nav-link-item">🏠 ホーム</a>
+    <a href="diary.html" class="nav-link-item">📖 日記</a>
+    <a href="profile.html" class="nav-link-item">👤 マイページ</a>
+    <a href="guide.html" class="nav-link-item">❓ 使い方</a>
+    <span id="nav-nickname" class="nav-nickname"></span>
+    <button class="btn-logout" onclick="handleLogout()">ログアウト</button>
+    <a id="nav-admin" href="admin.html" style="display:none;color:var(--light-amber);font-size:0.85rem;text-decoration:none;">⚙️</a>
+  </div>
+</header>
+
+<nav class="bottom-nav">
+  <a href="index.html"><span class="icon">🏠</span>ホーム</a>
+  <a href="diary.html"><span class="icon">📖</span>日記</a>
+  <a href="events.html" class="active"><span class="icon">🎪</span>イベント</a>
+  <a href="profile.html"><span class="icon">👤</span>マイページ</a>
+  <a href="index.html"><span class="icon">🔑</span>ログイン</a>
+</nav>
+
+<div class="page-wrapper">
+  <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:0.75rem;margin-bottom:1.5rem;">
+    <h1 class="section-title" style="margin:0;">🎪 イベント掲示板</h1>
+    <div id="create-btn-area"></div>
+  </div>
+
+  <p style="font-size:0.85rem;color:#7a5c4a;margin-bottom:1.5rem;line-height:1.7;">
+    管理者を介さず、会員どうし自由にイベントを企画・参加できます。新しいイベントから順に表示されます。
+  </p>
+
+  <!-- イベント作成フォーム -->
+  <div id="event-form-section" class="form-card">
+    <h2>🎊 イベントを企画する</h2>
+    <form id="event-form" onsubmit="submitEvent(event)">
+      <div class="form-group">
+        <label>イベント名 <span style="color:#b00">*</span></label>
+        <input type="text" id="ev-title" maxlength="100" placeholder="例：昭和歌謡カラオケ大会" required>
+      </div>
+      <div class="form-group">
+        <label>開催日時 <span style="color:#b00">*</span></label>
+        <input type="datetime-local" id="ev-date" required>
+      </div>
+      <div class="form-group">
+        <label>場所（またはオンライン）</label>
+        <input type="text" id="ev-location" placeholder="例：東京都新宿区、Zoom、未定">
+      </div>
+      <div class="form-group">
+        <label>イベントの説明</label>
+        <textarea id="ev-desc" rows="5" placeholder="どんなイベントか、参加方法などを書いてください"></textarea>
+      </div>
+      <div class="form-group">
+        <label>定員（参加人数。空欄=無制限）</label>
+        <input type="number" id="ev-max" min="2" max="9999" placeholder="例：20">
+      </div>
+      <div class="form-group">
+        <label>募集期限（任意）</label>
+        <input type="datetime-local" id="ev-deadline">
+        <p style="font-size:0.78rem;color:#7a5c4a;margin-top:0.3rem;">期限を過ぎる、または定員に達すると自動的に募集終了となります。</p>
+      </div>
+      <div class="form-group">
+        <label>タグ（カンマ区切り）</label>
+        <input type="text" id="ev-tags" placeholder="カラオケ, 昭和, 交流会…">
+      </div>
+      <div class="form-footer">
+        <button type="button" class="btn-secondary" onclick="toggleEventForm()">キャンセル</button>
+        <button type="submit" id="create-event-btn" class="btn-primary">🎊 イベントを作成</button>
+      </div>
+    </form>
+  </div>
+
+  <!-- イベント一覧（最新順） -->
+  <div id="events-list" class="events-grid">
+    <div class="loading-msg"><span class="loading-spinner"></span>イベントを読み込んでいます...</div>
+  </div>
+</div>
+
+<!-- ===== イベント詳細モーダル ===== -->
+<div class="modal-overlay" id="event-modal" onclick="if(event.target===this)closeEventModal()">
+  <div class="modal-box">
+    <button class="modal-close" onclick="closeEventModal()">✕</button>
+    <div id="event-modal-body"></div>
+  </div>
+</div>
+
+<!-- ===== イベント編集モーダル（v3新規） ===== -->
+<div class="modal-overlay" id="event-edit-modal" onclick="if(event.target===this)closeEventEditModal()">
+  <div class="modal-box">
+    <button class="modal-close" onclick="closeEventEditModal()">✕</button>
+    <h2 class="modal-title">✏️ イベントを編集</h2>
+    <div class="form-group">
+      <label>イベント名</label>
+      <input type="text" id="eev-title" maxlength="100">
+    </div>
+    <div class="form-group">
+      <label>開催日時</label>
+      <input type="datetime-local" id="eev-date">
+    </div>
+    <div class="form-group">
+      <label>場所</label>
+      <input type="text" id="eev-location">
+    </div>
+    <div class="form-group">
+      <label>説明</label>
+      <textarea id="eev-desc" rows="5"></textarea>
+    </div>
+    <div class="form-group">
+      <label>定員（空欄=無制限）</label>
+      <input type="number" id="eev-max" min="2" max="9999">
+    </div>
+    <div class="form-group">
+      <label>募集期限（任意）</label>
+      <input type="datetime-local" id="eev-deadline">
+    </div>
+    <div class="form-group">
+      <label>タグ</label>
+      <input type="text" id="eev-tags">
+    </div>
+    <div class="form-group">
+      <label>ステータス</label>
+      <select id="eev-status">
+        <option value="open">受付中</option>
+        <option value="closed">募集終了</option>
+        <option value="cancelled">キャンセル</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label class="checkbox-row">
+        <input type="checkbox" id="eev-notify"> 参加者全員に変更をメールで通知する
+      </label>
+    </div>
+    <div class="form-footer">
+      <button class="btn-secondary" onclick="closeEventEditModal()">キャンセル</button>
+      <button class="btn-primary" onclick="submitEventEdit()">更新する</button>
+    </div>
+  </div>
+</div>
+
+<script src="js/config.js"></script>
+<script src="js/auth.js"></script>
+<script src="js/events.js"></script>
+<script>
+function toggleEventForm() {
+  const sec = document.getElementById('event-form-section');
+  sec.classList.toggle('open');
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  updateNav();
+  enforcePasswordChangeIfNeeded();
+  loadEvents();
+
+  if (Auth.isLoggedIn()) {
+    document.getElementById('create-btn-area').innerHTML =
+      `<button class="btn-primary" onclick="toggleEventForm()">🎊 イベントを企画する</button>`;
+  }
+});
+</script>
+</body>
+</html>

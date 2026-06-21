@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>10年日記 | 今日も、10年後の自分へ</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<!-- ===== ヘッダー ===== -->
+<header class="site-header">
+  <a href="index.html" class="site-logo">📓 10年日記 <span>Jūnen Nikki</span></a>
+  <div id="nav-login" class="nav-links">
+    <a href="guide.html" class="nav-link-item">📖 使い方</a>
+    <button class="btn-secondary" style="font-size:0.85rem;padding:0.4rem 0.9rem;" onclick="openAuthModal('login')">ログイン</button>
+    <button class="btn-primary"   style="font-size:0.85rem;padding:0.4rem 0.9rem;" onclick="openAuthModal('register')">新規登録</button>
+  </div>
+  <div id="nav-user" class="nav-user" style="display:none">
+    <a href="diary.html" class="nav-link-item">📖 日記</a>
+    <a href="events.html" class="nav-link-item">🎪 イベント</a>
+    <a href="profile.html" class="nav-link-item">👤 マイページ</a>
+    <a href="guide.html" class="nav-link-item">❓ 使い方</a>
+    <span id="nav-nickname" class="nav-nickname"></span>
+    <button class="btn-logout" onclick="handleLogout()">ログアウト</button>
+    <a id="nav-admin" href="admin.html" style="display:none;color:var(--light-amber);font-size:0.85rem;text-decoration:none;">⚙️</a>
+  </div>
+</header>
+
+<!-- ===== ボトムナビ ===== -->
+<nav class="bottom-nav">
+  <a href="index.html" class="active"><span class="icon">🏠</span>ホーム</a>
+  <a href="diary.html"><span class="icon">📖</span>日記</a>
+  <a href="events.html"><span class="icon">🎪</span>イベント</a>
+  <a href="profile.html"><span class="icon">👤</span>マイページ</a>
+  <a href="#" onclick="openAuthModal('login');return false;" id="bottom-login-link"><span class="icon">🔑</span>ログイン</a>
+</nav>
+
+<!-- ===== ヒーロー ===== -->
+<section class="hero">
+  <h1 class="hero-title">今日も、10年後の自分へ。</h1>
+  <p class="hero-sub">世代を超えて、日常を綴り、人と繋がる場所</p>
+  <div class="hero-actions" id="hero-actions">
+    <button class="btn-primary" onclick="openAuthModal('register')">✨ 無料で始める</button>
+    <button class="btn-secondary" onclick="openAuthModal('login')">ログイン</button>
+  </div>
+</section>
+
+<!-- ===== 世代フィルター ===== -->
+<div class="page-wrapper">
+  <h2 class="section-title">📰 みんなの日記</h2>
+  <div class="gen-filter-bar" id="gen-filter"></div>
+  <div id="diary-feed" class="diary-feed">
+    <div class="loading-msg"><span class="loading-spinner"></span>日記を開いています...</div>
+  </div>
+</div>
+
+<!-- ===== 日記詳細モーダル ===== -->
+<div class="modal-overlay" id="diary-modal" onclick="if(event.target===this)closeModal()">
+  <div class="modal-box">
+    <button class="modal-close" onclick="closeModal()">✕</button>
+    <div id="modal-body"></div>
+  </div>
+</div>
+
+<!-- ===== 編集モーダル ===== -->
+<div class="modal-overlay" id="edit-modal" onclick="if(event.target===this)document.getElementById('edit-modal').style.display='none'">
+  <div class="modal-box">
+    <button class="modal-close" onclick="document.getElementById('edit-modal').style.display='none'">✕</button>
+    <h2 class="modal-title">📝 日記を編集</h2>
+    <div class="form-group">
+      <label>タイトル</label>
+      <input type="text" id="edit-title" maxlength="100">
+    </div>
+    <div class="form-group">
+      <label>本文</label>
+      <textarea id="edit-content" rows="8"></textarea>
+    </div>
+    <div class="form-group">
+      <label>気分</label>
+      <div class="mood-selector">
+        <button type="button" class="mood-btn" data-mood="😊" onclick="selectMood(this,'edit-mood')">😊</button>
+        <button type="button" class="mood-btn" data-mood="😢" onclick="selectMood(this,'edit-mood')">😢</button>
+        <button type="button" class="mood-btn" data-mood="😤" onclick="selectMood(this,'edit-mood')">😤</button>
+        <button type="button" class="mood-btn" data-mood="😴" onclick="selectMood(this,'edit-mood')">😴</button>
+        <button type="button" class="mood-btn" data-mood="🤔" onclick="selectMood(this,'edit-mood')">🤔</button>
+      </div>
+      <input type="hidden" id="edit-mood" value="😊">
+    </div>
+    <div class="form-group">
+      <label>タグ（カンマ区切り）</label>
+      <input type="text" id="edit-tags" placeholder="旅行, 日常, 仕事">
+    </div>
+    <div class="form-group">
+      <label class="checkbox-row">
+        <input type="checkbox" id="edit-public" checked> みんなに公開する
+      </label>
+    </div>
+    <div class="form-footer">
+      <button class="btn-secondary" onclick="document.getElementById('edit-modal').style.display='none'">キャンセル</button>
+      <button class="btn-primary" onclick="submitEdit()">更新する</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== 認証モーダル（v3：パスワード問い合わせ込み） ===== -->
+<div class="modal-overlay" id="auth-modal" onclick="if(event.target===this)closeAuthModal()">
+  <div class="modal-box">
+    <button class="modal-close" onclick="closeAuthModal()">✕</button>
+    <h2 class="modal-title">📓 10年日記</h2>
+    <div class="auth-tabs">
+      <button class="auth-tab active" onclick="switchAuthTab('login')">ログイン</button>
+      <button class="auth-tab" onclick="switchAuthTab('register')">新規登録</button>
+    </div>
+
+    <!-- ログイン -->
+    <div class="auth-form active" id="auth-login">
+      <div class="auth-error" id="login-error"></div>
+      <div class="form-group">
+        <label>会員番号（登録メールアドレス）</label>
+        <input type="email" id="login-email" autocomplete="email">
+      </div>
+      <div class="form-group">
+        <label>パスワード</label>
+        <div class="password-input-wrap">
+          <input type="password" id="login-password" autocomplete="current-password" onkeydown="if(event.key==='Enter')doLogin()">
+          <button type="button" class="pw-toggle-btn" onclick="togglePasswordVisibility('login-password', this)">👁️</button>
+        </div>
+      </div>
+      <p style="text-align:right;margin-bottom:0.75rem;">
+        <a href="#" style="font-size:0.85rem;color:var(--amber);" onclick="openResetModal();return false;">パスワードをお忘れの方はこちら</a>
+      </p>
+      <div class="form-footer">
+        <button class="btn-primary" style="width:100%" onclick="doLogin()">ログイン</button>
+      </div>
+    </div>
+
+    <!-- 登録（v3：パスワード入力欄なし・免責同意必須） -->
+    <div class="auth-form" id="auth-register">
+      <div class="auth-error" id="register-error"></div>
+      <p class="auth-note">📧 パスワードは入力いただく必要はありません。登録後、仮パスワードを登録メールアドレス宛にお送りします。</p>
+      <div class="form-group">
+        <label>メールアドレス（会員番号として使用します）</label>
+        <input type="email" id="reg-email" autocomplete="email">
+      </div>
+      <div class="form-group">
+        <label>ニックネーム</label>
+        <input type="text" id="reg-nickname" maxlength="20" placeholder="日記帳の主人">
+      </div>
+      <div class="form-group">
+        <label>生まれた年（任意）</label>
+        <input type="number" id="reg-birthyear" min="1940" max="2015" placeholder="例: 1990">
+      </div>
+      <div class="terms-box">
+        <p>会員登録には以下の内容への同意が必要です。</p>
+        <a href="terms.html" target="_blank">免責事項・注意事項を全文表示する ↗</a>
+        <label class="checkbox-row">
+          <input type="checkbox" id="reg-agree-terms">
+          上記の免責事項・注意事項に同意します
+        </label>
+      </div>
+      <div class="form-footer">
+        <button class="btn-primary" id="register-submit-btn" style="width:100%" disabled onclick="doRegister()">
+          登録する（仮パスワードをメールでお送りします）
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== パスワード再発行モーダル（v3新規） ===== -->
+<div class="modal-overlay" id="reset-modal" onclick="if(event.target===this)closeResetModal()">
+  <div class="modal-box">
+    <button class="modal-close" onclick="closeResetModal()">✕</button>
+    <h2 class="modal-title">🔑 パスワードをお忘れの方</h2>
+    <p style="font-size:0.88rem;color:#7a5c4a;margin-bottom:1rem;line-height:1.7;">
+      会員番号（登録メールアドレス）を入力してください。仮パスワードを発行し、登録メールアドレス宛にお送りします。
+    </p>
+    <div class="form-group">
+      <label>会員番号（メールアドレス）</label>
+      <input type="email" id="reset-email" onkeydown="if(event.key==='Enter')doRequestReset()">
+    </div>
+    <div class="form-footer">
+      <button class="btn-primary" style="width:100%" onclick="doRequestReset()">仮パスワードを発行する</button>
+    </div>
+  </div>
+</div>
+
+<script src="js/config.js"></script>
+<script src="js/auth.js"></script>
+<script src="js/diary.js"></script>
+<script>
+// ===== 認証モーダル操作 =====
+function openAuthModal(tab) {
+  document.getElementById('auth-modal').style.display = 'flex';
+  switchAuthTab(tab);
+}
+function closeAuthModal() {
+  document.getElementById('auth-modal').style.display = 'none';
+}
+function switchAuthTab(tab) {
+  document.querySelectorAll('.auth-tab').forEach((el,i) => el.classList.toggle('active', (i===0&&tab==='login')||(i===1&&tab==='register')));
+  document.getElementById('auth-login').classList.toggle('active', tab === 'login');
+  document.getElementById('auth-register').classList.toggle('active', tab === 'register');
+}
+
+function openResetModal() {
+  document.getElementById('reset-modal').style.display = 'flex';
+}
+function closeResetModal() {
+  document.getElementById('reset-modal').style.display = 'none';
+}
+
+// 免責事項チェックで登録ボタンの活性を切り替え
+document.addEventListener('DOMContentLoaded', () => {
+  const agreeBox = document.getElementById('reg-agree-terms');
+  if (agreeBox) {
+    agreeBox.addEventListener('change', function() {
+      document.getElementById('register-submit-btn').disabled = !this.checked;
+    });
+  }
+});
+
+async function doLogin() {
+  const email    = document.getElementById('login-email').value.trim();
+  const password = document.getElementById('login-password').value;
+  const errEl    = document.getElementById('login-error');
+  errEl.classList.remove('show');
+  if (!email || !password) { errEl.textContent = '会員番号とパスワードを入力してください'; errEl.classList.add('show'); return; }
+  try {
+    const res = await Auth.post({ action: 'login', email, password });
+    if (res.success) {
+      Auth.setSession(res);
+      closeAuthModal();
+      updateNav();
+      updateHeroForLoggedIn();
+      loadDiaries();
+      if (res.mustChangePassword) {
+        showToast(`${res.nickname} さん、仮パスワードでログイン中です。パスワードを変更してください`);
+        setTimeout(() => { location.href = 'profile.html?forceChange=1'; }, 800);
+      } else {
+        showToast(`おかえり、${res.nickname} さん！`);
+      }
+    } else {
+      errEl.textContent = res.error || 'ログインに失敗しました';
+      errEl.classList.add('show');
+    }
+  } catch(e) { errEl.textContent = '通信エラーが発生しました'; errEl.classList.add('show'); }
+}
+
+async function doRegister() {
+  const email     = document.getElementById('reg-email').value.trim();
+  const nickname  = document.getElementById('reg-nickname').value.trim();
+  const birthYear = document.getElementById('reg-birthyear').value;
+  const agreedTerms = document.getElementById('reg-agree-terms').checked;
+  const errEl     = document.getElementById('register-error');
+  errEl.classList.remove('show');
+  if (!email || !nickname) { errEl.textContent = '必須項目を入力してください'; errEl.classList.add('show'); return; }
+  if (!agreedTerms) { errEl.textContent = '免責事項・注意事項への同意が必要です'; errEl.classList.add('show'); return; }
+  const btn = document.getElementById('register-submit-btn');
+  btn.disabled = true; btn.textContent = '登録中...';
+  try {
+    const res = await Auth.post({ action: 'register', email, nickname, birthYear, agreedTerms });
+    if (res.success) {
+      showToast('登録完了！仮パスワードをメールで送信しました 📧');
+      switchAuthTab('login');
+      document.getElementById('login-email').value = email;
+    } else {
+      errEl.textContent = res.error || '登録に失敗しました';
+      errEl.classList.add('show');
+    }
+  } catch(e) { errEl.textContent = '通信エラーが発生しました'; errEl.classList.add('show'); }
+  btn.disabled = false; btn.textContent = '登録する（仮パスワードをメールでお送りします）';
+}
+
+async function doRequestReset() {
+  const email = document.getElementById('reset-email').value.trim();
+  if (!email) { showToast('会員番号を入力してください', 'error'); return; }
+  try {
+    const res = await Auth.post({ action: 'requestPasswordReset', email });
+    showToast(res.message || '登録されているメールアドレスの場合、仮パスワードを送信しました');
+    closeResetModal();
+  } catch(e) { showToast('通信エラーが発生しました', 'error'); }
+}
+
+function updateHeroForLoggedIn() {
+  const actions = document.getElementById('hero-actions');
+  const bottomLink = document.getElementById('bottom-login-link');
+  if (Auth.isLoggedIn()) {
+    actions.innerHTML = `<a href="diary.html" class="btn-primary">📖 日記を書く</a><a href="events.html" class="btn-secondary">🎪 イベントを見る</a>`;
+    if (bottomLink) { bottomLink.href = 'profile.html'; bottomLink.querySelector('span').textContent = '👤'; bottomLink.lastChild.textContent = 'マイページ'; }
+  }
+}
+
+function selectMood(btn, hiddenId) {
+  btn.closest('.mood-selector').querySelectorAll('.mood-btn').forEach(b => b.classList.remove('selected'));
+  btn.classList.add('selected');
+  document.getElementById(hiddenId).value = btn.dataset.mood;
+}
+
+// 初期化
+document.addEventListener('DOMContentLoaded', () => {
+  updateNav();
+  updateHeroForLoggedIn();
+  renderGenFilter('gen-filter');
+  loadDiaries();
+  enforcePasswordChangeIfNeeded();
+});
+</script>
+</body>
+</html>

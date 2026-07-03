@@ -1,3 +1,21 @@
+// GAS Webアプリは応答時に script.googleusercontent.com へリダイレクトされる際、
+// まれにCORSのタイミング不整合でfetchが失敗することがある（Google側の既知の癖で、
+// サーバー側は実際には毎回正常に処理を完了している）。
+// そのため、失敗時は少し待って自動的に再試行する。
+async function fetchWithRetry_(doFetch, maxRetries = 2) {
+  let lastErr;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const res = await doFetch();
+      return await res.json();
+    } catch (err) {
+      lastErr = err;
+      if (attempt < maxRetries) await new Promise(r => setTimeout(r, 500 * (attempt + 1)));
+    }
+  }
+  throw lastErr;
+}
+
 const Auth = {
   getToken:    () => sessionStorage.getItem('token'),
   getNickname: () => sessionStorage.getItem('nickname'),
@@ -9,6 +27,8 @@ const Auth = {
   mustChangePassword: () => sessionStorage.getItem('mustChangePassword') === 'true',
 
   setSession(data) {
+    // 別アカウントへの切り替えに備え、前のセッションで溜まったキャッシュを先に破棄
+    if (typeof resetDiaryCaches === 'function') resetDiaryCaches();
     sessionStorage.setItem('token',     data.token);
     sessionStorage.setItem('nickname',  data.nickname);
     sessionStorage.setItem('memberId',  data.memberId);
@@ -16,17 +36,18 @@ const Auth = {
     sessionStorage.setItem('birthYear', data.birthYear || '');
     sessionStorage.setItem('mustChangePassword', data.mustChangePassword ? 'true' : 'false');
   },
-  clearSession() { sessionStorage.clear(); },
+  clearSession() {
+    sessionStorage.clear();
+    if (typeof resetDiaryCaches === 'function') resetDiaryCaches();
+  },
 
   async post(params) {
-    const res = await fetch(GAS_URL, { method: 'POST', body: JSON.stringify(params) });
-    return res.json();
+    return fetchWithRetry_(() => fetch(GAS_URL, { method: 'POST', body: JSON.stringify(params) }));
   },
   async get(params) {
     const url = new URL(GAS_URL);
     Object.entries(params).forEach(([k, v]) => url.searchParams.append(k, v));
-    const res = await fetch(url, { redirect: 'follow' });
-    return res.json();
+    return fetchWithRetry_(() => fetch(url, { redirect: 'follow' }));
   }
 };
 
@@ -133,4 +154,15 @@ function enforcePasswordChangeIfNeeded() {
 function escHtml(str) {
   if (!str) return '';
   return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// onclick="fn('...')" のようにJS文字列リテラル＋HTML属性の両方の文脈に
+// 値を埋め込む際に使う安全なエスケープ（diaryId等、サーバー由来の値に必ず使用する）
+function escJsAttr(str) {
+  return String(str)
+    .replace(/\\/g, '\\\\')
+    .replace(/'/g, "\\'")
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
 }

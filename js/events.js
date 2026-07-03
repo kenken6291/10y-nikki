@@ -215,8 +215,8 @@ async function submitEvent(e) {
       loadEvents();
       const formSection = document.getElementById('event-form-section');
       if (formSection) formSection.classList.remove('open');
-    } else showToast(res.error || 'エラー', 'error');
-  } catch(e) { showToast('エラー', 'error'); }
+    } else showToast((res.error || 'エラー') + (res.error ? '' : ' (詳細: ' + JSON.stringify(res) + ')'), 'error');
+  } catch(e) { showToast('エラー: ' + (e.message || String(e)), 'error'); }
   btn.disabled = false; btn.textContent = '🎊 イベントを作成';
 }
 

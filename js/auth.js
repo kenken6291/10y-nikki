@@ -2,7 +2,7 @@
 // まれにCORSのタイミング不整合でfetchが失敗することがある（Google側の既知の癖で、
 // サーバー側は実際には毎回正常に処理を完了している）。
 // そのため、失敗時は少し待って自動的に再試行する。
-async function fetchWithRetry_(doFetch, maxRetries = 2) {
+async function fetchWithRetry_(doFetch, maxRetries = 3) {
   let lastErr;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
@@ -10,7 +10,7 @@ async function fetchWithRetry_(doFetch, maxRetries = 2) {
       return await res.json();
     } catch (err) {
       lastErr = err;
-      if (attempt < maxRetries) await new Promise(r => setTimeout(r, 500 * (attempt + 1)));
+      if (attempt < maxRetries) await new Promise(r => setTimeout(r, 700 * (attempt + 1)));
     }
   }
   throw lastErr;

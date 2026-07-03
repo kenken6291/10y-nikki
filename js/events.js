@@ -6,7 +6,7 @@ async function loadEvents() {
   try {
     const res = await Auth.get({ action: 'getEvents' });
     if (res.success) renderEvents(res.events, container);
-    else container.innerHTML = '<p class="empty-msg">読み込みに失敗しました。</p>';
+    else container.innerHTML = `<p class="empty-msg">読み込みに失敗しました。<br><small style="opacity:0.7">${escHtml(res.error || '')}</small></p>`;
   } catch(e) { container.innerHTML = `<p class="empty-msg">接続エラー<br><small style="opacity:0.7">${escHtml(e.message || String(e))}</small></p>`; }
 }
 

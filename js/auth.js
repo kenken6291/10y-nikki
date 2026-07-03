@@ -67,6 +67,8 @@ const Auth = {
   async get(params) {
     const url = new URL(GAS_URL);
     Object.entries(params).forEach(([k, v]) => url.searchParams.append(k, v));
+    // ブラウザ側の古いキャッシュ（CORSヘッダー欠落時のレスポンス等）を再利用させないための対策
+    url.searchParams.append('_ts', Date.now());
     return requestWithRetry_(() => xhrRequest_('GET', url.toString()));
   }
 };

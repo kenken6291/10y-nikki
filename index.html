@@ -92,6 +92,12 @@
       <input type="text" id="edit-tags" placeholder="旅行, 日常, 仕事">
     </div>
     <div class="form-group">
+      <label>📷 写真（最大5枚）</label>
+      <div id="edit-photo-existing" class="photo-preview-grid"></div>
+      <input type="file" id="edit-photo-input" accept="image/*" multiple onchange="handlePhotoSelect(event, 'edit')">
+      <div id="edit-photo-preview" class="photo-preview-grid"></div>
+    </div>
+    <div class="form-group">
       <label class="checkbox-row">
         <input type="checkbox" id="edit-public" checked> みんなに公開する
       </label>

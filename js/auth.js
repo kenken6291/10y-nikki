@@ -1,13 +1,33 @@
-// GAS Webアプリは応答時に script.googleusercontent.com へリダイレクトされる際、
-// まれにCORSのタイミング不整合でfetchが失敗することがある（Google側の既知の癖で、
-// サーバー側は実際には毎回正常に処理を完了している）。
-// そのため、失敗時は少し待って自動的に再試行する。
-async function fetchWithRetry_(doFetch, maxRetries = 3) {
+// GAS Webアプリは応答時に script.google.com → script.googleusercontent.com へ
+// 302リダイレクトされるが、そのリダイレクト応答自体に
+// 'Access-Control-Allow-Origin' ヘッダーが付与されないことがあり、
+// fetch() だとCORSエラーで失敗する（Google側の既知の癖。サーバー側の処理自体は
+// 毎回正常に完了している）。XMLHttpRequestはこの組み合わせで問題が起きにくいため、
+// こちらを使い、念のため失敗時は少し待って自動的に再試行する。
+function xhrRequest_(method, url, body) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open(method, url, true);
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try { resolve(JSON.parse(xhr.responseText)); }
+        catch (e) { reject(new Error('レスポンスの解析に失敗しました')); }
+      } else {
+        reject(new Error('HTTP ' + xhr.status));
+      }
+    };
+    xhr.onerror = () => reject(new Error('Network error'));
+    xhr.ontimeout = () => reject(new Error('Timeout'));
+    xhr.timeout = 20000;
+    if (body !== undefined) xhr.send(body); else xhr.send();
+  });
+}
+
+async function requestWithRetry_(doRequest, maxRetries = 3) {
   let lastErr;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
-      const res = await doFetch();
-      return await res.json();
+      return await doRequest();
     } catch (err) {
       lastErr = err;
       if (attempt < maxRetries) await new Promise(r => setTimeout(r, 700 * (attempt + 1)));
@@ -42,12 +62,12 @@ const Auth = {
   },
 
   async post(params) {
-    return fetchWithRetry_(() => fetch(GAS_URL, { method: 'POST', body: JSON.stringify(params) }));
+    return requestWithRetry_(() => xhrRequest_('POST', GAS_URL, JSON.stringify(params)));
   },
   async get(params) {
     const url = new URL(GAS_URL);
     Object.entries(params).forEach(([k, v]) => url.searchParams.append(k, v));
-    return fetchWithRetry_(() => fetch(url, { redirect: 'follow' }));
+    return requestWithRetry_(() => xhrRequest_('GET', url.toString()));
   }
 };
 

@@ -585,3 +585,145 @@ function selectMood(btn, hiddenId) {
   btn.classList.add('selected');
   document.getElementById(hiddenId).value = btn.dataset.mood;
 }
+
+// ===== 音声入力（Web Speech API による録音 → GAS経由でGemini整形） =====
+let voiceRecognition = null;
+let voiceRecording = false;
+let voiceFinalTranscript = '';
+let voiceRawTranscript = '';
+
+function getSpeechRecognitionCtor_() {
+  return window.SpeechRecognition || window.webkitSpeechRecognition || null;
+}
+
+function openVoiceModal() {
+  const modal = document.getElementById('voice-modal');
+  if (!modal) return;
+  voiceFinalTranscript = '';
+  voiceRawTranscript = '';
+  document.getElementById('voice-transcript').textContent = '';
+  document.getElementById('voice-status').textContent = 'タップして開始';
+  document.getElementById('voice-mic-btn').classList.remove('recording');
+  document.getElementById('voice-step-record').style.display = 'block';
+  document.getElementById('voice-step-loading').style.display = 'none';
+  document.getElementById('voice-step-confirm').style.display = 'none';
+  modal.style.display = 'flex';
+}
+
+function closeVoiceModal() {
+  stopVoiceRecognition_();
+  const modal = document.getElementById('voice-modal');
+  if (modal) modal.style.display = 'none';
+}
+
+function stopVoiceRecognition_() {
+  voiceRecording = false;
+  if (voiceRecognition) {
+    try { voiceRecognition.onend = null; voiceRecognition.stop(); } catch (e) { /* 無視 */ }
+  }
+}
+
+function toggleVoiceRecording() {
+  const Ctor = getSpeechRecognitionCtor_();
+  if (!Ctor) { showToast('このブラウザは音声入力に対応していません', 'error'); return; }
+  const micBtn = document.getElementById('voice-mic-btn');
+  const statusEl = document.getElementById('voice-status');
+
+  if (voiceRecording) {
+    // 2回目のタップ＝録音終了 → AI整形へ
+    stopVoiceRecognition_();
+    micBtn.classList.remove('recording');
+    statusEl.textContent = 'タップして開始';
+    const text = voiceFinalTranscript.trim();
+    if (!text) { showToast('音声が認識できませんでした。もう一度お試しください', 'error'); return; }
+    runVoiceFormatting_(text);
+    return;
+  }
+
+  voiceFinalTranscript = '';
+  document.getElementById('voice-transcript').textContent = '';
+  voiceRecognition = new Ctor();
+  voiceRecognition.lang = 'ja-JP';
+  voiceRecognition.continuous = true;
+  voiceRecognition.interimResults = true;
+
+  voiceRecognition.onresult = (e) => {
+    let interim = '';
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      const chunk = e.results[i][0].transcript;
+      if (e.results[i].isFinal) voiceFinalTranscript += chunk;
+      else interim += chunk;
+    }
+    const box = document.getElementById('voice-transcript');
+    box.textContent = voiceFinalTranscript + interim;
+    box.scrollTop = box.scrollHeight;
+  };
+  voiceRecognition.onerror = (e) => {
+    if (e.error === 'no-speech') return; // 無音は無視して継続
+    showToast('音声認識でエラーが発生しました', 'error');
+  };
+  voiceRecognition.onend = () => {
+    // 無音等でブラウザ側が自動停止した場合、録音継続中なら自動的に再開する
+    if (voiceRecording) {
+      try { voiceRecognition.start(); } catch (e) { /* 無視 */ }
+    }
+  };
+
+  voiceRecording = true;
+  micBtn.classList.add('recording');
+  statusEl.textContent = '聞き取り中...（もう一度タップで停止）';
+  try { voiceRecognition.start(); } catch (e) { /* 無視 */ }
+}
+
+async function runVoiceFormatting_(rawText) {
+  voiceRawTranscript = rawText;
+  document.getElementById('voice-step-record').style.display = 'none';
+  document.getElementById('voice-step-loading').style.display = 'block';
+  try {
+    const res = await Auth.post({ action: 'formatVoiceDiary', token: Auth.getToken(), rawText });
+    document.getElementById('voice-step-loading').style.display = 'none';
+    if (res.success) {
+      document.getElementById('voice-result-title').value   = res.title || '';
+      document.getElementById('voice-result-content').value = res.content || '';
+      document.getElementById('voice-result-tags').value    = res.tags || '';
+      const mood = res.mood || '😊';
+      document.getElementById('voice-result-mood').value = mood;
+      document.querySelectorAll('#voice-mood-selector .mood-btn').forEach(b => {
+        b.classList.toggle('selected', b.dataset.mood === mood);
+      });
+      document.getElementById('voice-raw-transcript').textContent = voiceRawTranscript;
+      document.getElementById('voice-step-confirm').style.display = 'block';
+    } else {
+      showToast(res.error || 'AIによる整形に失敗しました', 'error');
+      document.getElementById('voice-step-record').style.display = 'block';
+    }
+  } catch (e) {
+    document.getElementById('voice-step-loading').style.display = 'none';
+    document.getElementById('voice-step-record').style.display = 'block';
+    showToast('接続エラーが発生しました', 'error');
+  }
+}
+
+// 「削除してやり直す」：AIの整形結果を破棄して録音ステップに戻る
+function discardVoiceResult() {
+  if (!confirm('AIが整形した内容を削除してやり直しますか？')) return;
+  voiceFinalTranscript = '';
+  voiceRawTranscript = '';
+  document.getElementById('voice-transcript').textContent = '';
+  document.getElementById('voice-step-confirm').style.display = 'none';
+  document.getElementById('voice-step-record').style.display = 'block';
+}
+
+// 「この内容を投稿フォームに反映」：確認・修正済みの内容を通常の投稿フォームへコピー
+function applyVoiceResult() {
+  document.getElementById('diary-title').value   = document.getElementById('voice-result-title').value.trim();
+  document.getElementById('diary-content').value = document.getElementById('voice-result-content').value.trim();
+  document.getElementById('diary-tags').value    = document.getElementById('voice-result-tags').value.trim();
+  const mood = document.getElementById('voice-result-mood').value || '😊';
+  document.getElementById('diary-mood').value = mood;
+  document.querySelectorAll('#post-mood-selector .mood-btn').forEach(b => {
+    b.classList.toggle('selected', b.dataset.mood === mood);
+  });
+  closeVoiceModal();
+  showToast('音声の内容を投稿フォームに反映しました。内容を確認して投稿してください');
+}

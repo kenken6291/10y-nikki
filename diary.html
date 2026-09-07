@@ -5,6 +5,39 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>日記 | 10年日記</title>
   <link rel="stylesheet" href="css/style.css">
+  <style>
+    .voice-entry-row { display:flex; align-items:center; gap:0.75rem; margin-bottom:1.25rem; flex-wrap:wrap; }
+    .btn-voice {
+      background: var(--light-amber); color: var(--sepia); border:none; border-radius:999px;
+      padding:0.55rem 1.1rem; font-size:0.95rem; font-weight:bold; cursor:pointer;
+      display:inline-flex; align-items:center; gap:0.4rem; transition: transform 0.15s;
+    }
+    .btn-voice:hover { transform: translateY(-1px); }
+    .voice-hint { font-size:0.8rem; color:#8a7862; }
+    .voice-desc { font-size:0.9rem; color:#7a5c4a; line-height:1.7; margin-bottom:1.25rem; }
+    .voice-record-area { text-align:center; padding:1.5rem 0 1rem; }
+    .voice-mic-btn {
+      width:84px; height:84px; border-radius:50%; border:none; background: var(--amber);
+      color:#fff; font-size:2rem; cursor:pointer; box-shadow: 0 4px 10px var(--shadow);
+      transition: background 0.2s, transform 0.2s;
+    }
+    .voice-mic-btn:hover { transform: scale(1.05); }
+    .voice-mic-btn.recording { background: var(--warn); animation: voicePulse 1.2s infinite; }
+    @keyframes voicePulse {
+      0% { box-shadow: 0 0 0 0 rgba(176,39,28,0.45); }
+      70% { box-shadow: 0 0 0 16px rgba(176,39,28,0); }
+      100% { box-shadow: 0 0 0 0 rgba(176,39,28,0); }
+    }
+    .voice-status { margin-top:0.75rem; color: var(--brown); font-size:0.9rem; }
+    .voice-transcript-box { margin-top:1rem; }
+    .voice-transcript-box label { display:block; font-size:0.8rem; color:#8a7862; margin-bottom:0.35rem; }
+    .voice-transcript {
+      min-height:3.5rem; max-height:9rem; overflow-y:auto; background: var(--sub-bg);
+      border-radius:8px; padding:0.75rem 0.9rem; font-size:0.9rem; color: var(--sepia);
+      white-space:pre-wrap; line-height:1.7;
+    }
+    .voice-transcript-raw { background:#f5f0e6; color:#8a7862; font-size:0.82rem; }
+  </style>
 </head>
 <body>
 
@@ -53,6 +86,10 @@
     <div id="tab-post" class="tab-content">
       <div class="form-card">
         <h2>✏️ 今日の日記</h2>
+        <div class="voice-entry-row">
+          <button type="button" class="btn-voice" onclick="openVoiceModal()">🎤 音声で入力する</button>
+          <span class="voice-hint">話した内容をAIが自動でタイトル・本文に整えます</span>
+        </div>
         <form id="diary-form" onsubmit="submitDiary(event)">
           <div class="form-group">
             <label>タイトル <span style="color:#b00">*</span></label>
@@ -64,7 +101,7 @@
           </div>
           <div class="form-group">
             <label>今日の気分</label>
-            <div class="mood-selector">
+            <div class="mood-selector" id="post-mood-selector">
               <button type="button" class="mood-btn selected" data-mood="😊" onclick="selectMoodDiary(this)">😊</button>
               <button type="button" class="mood-btn" data-mood="😢" onclick="selectMoodDiary(this)">😢</button>
               <button type="button" class="mood-btn" data-mood="😤" onclick="selectMoodDiary(this)">😤</button>
@@ -173,6 +210,69 @@
     <div class="form-footer">
       <button class="btn-secondary" onclick="document.getElementById('edit-modal').style.display='none'">キャンセル</button>
       <button class="btn-primary" onclick="submitEdit()">更新する</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== 音声入力モーダル ===== -->
+<div class="modal-overlay" id="voice-modal" onclick="if(event.target===this)closeVoiceModal()">
+  <div class="modal-box">
+    <button class="modal-close" onclick="closeVoiceModal()">✕</button>
+    <h2 class="modal-title">🎤 音声で日記を入力</h2>
+
+    <!-- 録音ステップ -->
+    <div id="voice-step-record">
+      <p class="voice-desc">マイクのボタンを押して、今日の出来事を話してください。話し終わったらもう一度ボタンを押すと、AIが日記の形に整えます。</p>
+      <div class="voice-record-area">
+        <button type="button" id="voice-mic-btn" class="voice-mic-btn" onclick="toggleVoiceRecording()">🎤</button>
+        <p id="voice-status" class="voice-status">タップして開始</p>
+      </div>
+      <div class="voice-transcript-box">
+        <label>聞き取り中の内容</label>
+        <div id="voice-transcript" class="voice-transcript"></div>
+      </div>
+    </div>
+
+    <!-- AI整形中 -->
+    <div id="voice-step-loading" style="display:none;text-align:center;padding:2rem 0;">
+      <span class="loading-spinner"></span>
+      <p style="margin-top:0.75rem;color:var(--brown);">AIが日記の形に整えています...</p>
+    </div>
+
+    <!-- 確認・修正ステップ -->
+    <div id="voice-step-confirm" style="display:none;">
+      <p class="voice-desc">AIが整えた内容です。内容を確認し、必要であれば自由に修正してください。</p>
+      <div class="form-group">
+        <label>タイトル</label>
+        <input type="text" id="voice-result-title" maxlength="100">
+      </div>
+      <div class="form-group">
+        <label>本文</label>
+        <textarea id="voice-result-content" rows="8"></textarea>
+      </div>
+      <div class="form-group">
+        <label>今日の気分</label>
+        <div class="mood-selector" id="voice-mood-selector">
+          <button type="button" class="mood-btn" data-mood="😊" onclick="selectMood(this,'voice-result-mood')">😊</button>
+          <button type="button" class="mood-btn" data-mood="😢" onclick="selectMood(this,'voice-result-mood')">😢</button>
+          <button type="button" class="mood-btn" data-mood="😤" onclick="selectMood(this,'voice-result-mood')">😤</button>
+          <button type="button" class="mood-btn" data-mood="😴" onclick="selectMood(this,'voice-result-mood')">😴</button>
+          <button type="button" class="mood-btn" data-mood="🤔" onclick="selectMood(this,'voice-result-mood')">🤔</button>
+        </div>
+        <input type="hidden" id="voice-result-mood" value="😊">
+      </div>
+      <div class="form-group">
+        <label>タグ（カンマ区切り）</label>
+        <input type="text" id="voice-result-tags">
+      </div>
+      <div class="voice-transcript-box">
+        <label>元の音声の文字起こし（参考）</label>
+        <div id="voice-raw-transcript" class="voice-transcript voice-transcript-raw"></div>
+      </div>
+      <div class="form-footer">
+        <button type="button" class="btn-delete-sm" onclick="discardVoiceResult()">🗑️ 削除してやり直す</button>
+        <button type="button" class="btn-primary" onclick="applyVoiceResult()">✅ この内容を投稿フォームに反映</button>
+      </div>
     </div>
   </div>
 </div>

@@ -441,7 +441,11 @@ async function submitDiary(e) {
 
 // ===== 編集モーダル =====
 function openEditModal(diaryId) {
-  const diary = currentDiaries.find(d => d.diaryId === diaryId) || {};
+  // 「マイ日記」タブ（allMyDiaries）と「みんなの日記」タブ（currentDiaries）の
+  // どちらから開かれても見つかるよう両方を探す（片方だけだと空欄になる不具合があった）
+  const diary = currentDiaries.find(d => d.diaryId === diaryId)
+             || allMyDiaries.find(d => d.diaryId === diaryId)
+             || {};
   const modal = document.getElementById('edit-modal');
   if (!modal) return;
   modal.dataset.diaryId = diaryId;

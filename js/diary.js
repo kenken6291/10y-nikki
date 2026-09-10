@@ -395,7 +395,7 @@ function renderMyDiaries(diaries, container) {
     return;
   }
   container.innerHTML = diaries.map(d => `
-    <article class="diary-card my-diary-card">
+    <article class="diary-card my-diary-card" onclick="openDiaryDetail('${escJsAttr(d.diaryId)}')">
       <div class="card-header">
         <span class="card-mood">${d.mood || '😊'}</span>
         <span class="card-date">${formatDate(d.createdAt)}</span>
@@ -408,8 +408,8 @@ function renderMyDiaries(diaries, container) {
       <div class="card-footer">
         <span class="stat-btn">❤️ ${d.likeCount||0}</span>
         <span class="stat-btn">💬 ${d.commentCount||0}</span>
-        <button class="btn-edit-sm" onclick="openEditModal('${escJsAttr(d.diaryId)}')">✏️</button>
-        <button class="btn-delete-xs" onclick="deleteDiary('${escJsAttr(d.diaryId)}')">🗑️</button>
+        <button class="btn-edit-sm" onclick="event.stopPropagation(); openEditModal('${escJsAttr(d.diaryId)}')">✏️</button>
+        <button class="btn-delete-xs" onclick="event.stopPropagation(); deleteDiary('${escJsAttr(d.diaryId)}')">🗑️</button>
       </div>
     </article>
   `).join('');

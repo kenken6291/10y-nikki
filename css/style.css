@@ -195,7 +195,8 @@ body {
 .modal-box {
   background: var(--cream); border-radius: 12px; max-width: 680px; width: 100%; margin: auto;
   padding: 1.75rem; box-shadow: 0 8px 32px rgba(44,24,16,0.3); position: relative;
-  max-height: 90vh; overflow-y: auto;
+  max-height: 90vh; overflow-y: auto; -webkit-overflow-scrolling: touch;
+  min-height: 0; min-width: 0; flex-shrink: 1;
 }
 .modal-close { position: absolute; top: 1rem; right: 1rem; background: transparent; border: none; font-size: 1.5rem; cursor: pointer; color: var(--brown); line-height: 1; }
 .modal-title {

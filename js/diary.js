@@ -374,7 +374,7 @@ async function deleteComment(commentId) {
 }
 
 // ===== マイ日記 =====
-let allMyDiaries = []; // 「今日は」タブで再利用するためのキャッシュ
+let allMyDiaries = []; // 「同じ日」「ランダム」タブで再利用するためのキャッシュ
 async function loadMyDiaries() {
   const container = document.getElementById('my-diaries');
   if (!container) return;
@@ -497,51 +497,274 @@ async function deleteDiary(diaryId) {
   } catch(e) { showToast('エラー', 'error'); }
 }
 
-// ===== 今日は（毎年の同じ月日を新しい年から順に） =====
+// ===== 自分の日記キャッシュを確実に用意する（「同じ日」「ランダム」タブ共通） =====
+async function ensureMyDiaries(force = false) {
+  if (force || !allMyDiaries.length) {
+    try {
+      const res = await Auth.post({ action: 'getMyDiaries', token: Auth.getToken() });
+      if (res.success) allMyDiaries = res.diaries || [];
+    } catch (e) { /* 呼び出し側で0件表示になる */ }
+  }
+  return allMyDiaries;
+}
+
+// ===== 振り返り表示の共通ヘルパー =====
+const WDAYS = ['日','月','火','水','木','金','土'];
+let recallLayout = 'row'; // 'row'=横並び / 'col'=縦並び
+
+function pad2_(n) { return String(n).padStart(2, '0'); }
+
+// createdAt → 端末ローカル時刻での 'YYYY-MM-DD'
+function localDateKey_(iso) {
+  const d = new Date(iso);
+  if (isNaN(d)) return '';
+  return `${d.getFullYear()}-${pad2_(d.getMonth() + 1)}-${pad2_(d.getDate())}`;
+}
+
+// 日記を 'YYYY-MM-DD' ごとにまとめる（同じ日に複数書いた場合は時刻の古い順）
+function groupDiariesByDate_(diaries) {
+  const map = {};
+  diaries.forEach(d => {
+    const k = localDateKey_(d.createdAt);
+    if (!k) return;
+    (map[k] = map[k] || []).push(d);
+  });
+  Object.values(map).forEach(arr => arr.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt)));
+  return map;
+}
+
+// 何年前・何か月前・何日前のラベル
+function agoLabel_(dateKey) {
+  const [y, m, d] = dateKey.split('-').map(Number);
+  const then = new Date(y, m - 1, d);
+  const now = new Date(); now.setHours(0, 0, 0, 0);
+  const days = Math.round((now - then) / 86400000);
+  if (days <= 0) return '今日';
+  if (days < 31) return `${days}日前`;
+  let years = now.getFullYear() - y;
+  if (now.getMonth() + 1 < m || (now.getMonth() + 1 === m && now.getDate() < d)) years--;
+  if (years >= 1) return `${years}年前`;
+  const months = (now.getFullYear() - y) * 12 + (now.getMonth() + 1 - m) - (now.getDate() < d ? 1 : 0);
+  return `${Math.max(1, months)}か月前`;
+}
+
+// 1件分の日記カード（列の中に縦に積む）
+function recallEntryHtml_(d) {
+  const photoCount = parsePhotos(d.photos).length;
+  const body = (d.content || '');
+  const preview = body.length > 180 ? body.substring(0, 180) + '…' : body;
+  const time = new Date(d.createdAt);
+  return `
+    <div class="rc-entry" onclick="openDiaryDetail('${escJsAttr(d.diaryId)}')">
+      <div class="rc-entry-top">
+        <span class="rc-mood">${d.mood || '😊'}</span>
+        <span class="rc-time">${pad2_(time.getHours())}:${pad2_(time.getMinutes())}</span>
+        ${photoCount ? `<span class="rc-badge">📷 ${photoCount}</span>` : ''}
+        <span class="rc-badge rc-vis">${d.isPublic ? '🌐' : '🔒'}</span>
+      </div>
+      <div class="rc-title">${escHtml(d.title)}</div>
+      <div class="rc-body">${escHtml(preview)}</div>
+      ${d.tags ? `<div class="card-tags">${d.tags.split(',').filter(t => t.trim()).map(t => `<span class="tag">${escHtml(t.trim())}</span>`).join('')}</div>` : ''}
+    </div>`;
+}
+
+function setRecallLayout(layout) {
+  recallLayout = layout;
+  document.querySelectorAll('.rc-columns').forEach(el => el.classList.toggle('vertical', layout === 'col'));
+  document.querySelectorAll('.rc-layout-btn').forEach(b => b.classList.toggle('active', b.dataset.layout === layout));
+}
+
+function columnsClass_() { return 'rc-columns' + (recallLayout === 'col' ? ' vertical' : ''); }
+
+// ===== 同じ日（毎年の同じ月日を年ごとに横並び） =====
+let sameDayMonth = null; // 1-12
+let sameDayDay   = null; // 1-31
+let sameDayOrder = 'desc'; // desc=新しい年から / asc=古い年から
+
+function daysInMonth_(m) { return new Date(2024, m, 0).getDate(); } // 2024年はうるう年＝2/29も選べる
+
+function initSameDayControls_() {
+  const mSel = document.getElementById('sd-month');
+  const dSel = document.getElementById('sd-day');
+  if (!mSel || !dSel) return;
+  if (!mSel.options.length) {
+    mSel.innerHTML = Array.from({ length: 12 }, (_, i) => `<option value="${i + 1}">${i + 1}月</option>`).join('');
+  }
+  mSel.value = String(sameDayMonth);
+  const max = daysInMonth_(sameDayMonth);
+  if (sameDayDay > max) sameDayDay = max;
+  dSel.innerHTML = Array.from({ length: max }, (_, i) => `<option value="${i + 1}">${i + 1}日</option>`).join('');
+  dSel.value = String(sameDayDay);
+}
+
+function onSameDaySelect() {
+  sameDayMonth = Number(document.getElementById('sd-month').value);
+  sameDayDay   = Number(document.getElementById('sd-day').value);
+  renderOnThisDay();
+}
+
+function shiftSameDay(delta) {
+  const dt = new Date(2024, sameDayMonth - 1, sameDayDay + delta);
+  sameDayMonth = dt.getMonth() + 1;
+  sameDayDay   = dt.getDate();
+  renderOnThisDay();
+}
+
+// 記録のある前後の月日へジャンプ（年は問わず、月日だけで判定）
+function jumpSameDayWithRecord(dir) {
+  const mdSet = [...new Set(allMyDiaries.map(d => localDateKey_(d.createdAt).slice(5)).filter(Boolean))].sort();
+  if (!mdSet.length) { showToast('まだ日記がありません', 'error'); return; }
+  const cur = `${pad2_(sameDayMonth)}-${pad2_(sameDayDay)}`;
+  let target;
+  if (dir > 0) target = mdSet.find(md => md > cur) || mdSet[0];
+  else target = [...mdSet].reverse().find(md => md < cur) || mdSet[mdSet.length - 1];
+  const [m, d] = target.split('-').map(Number);
+  sameDayMonth = m; sameDayDay = d;
+  renderOnThisDay();
+}
+
+function resetSameDayToday() {
+  const t = new Date();
+  sameDayMonth = t.getMonth() + 1;
+  sameDayDay   = t.getDate();
+  renderOnThisDay();
+}
+
+function toggleSameDayOrder() {
+  sameDayOrder = sameDayOrder === 'desc' ? 'asc' : 'desc';
+  const b = document.getElementById('sd-order-btn');
+  if (b) b.textContent = sameDayOrder === 'desc' ? '⇅ 新しい年から' : '⇅ 古い年から';
+  renderOnThisDay();
+}
+
+// 別タブ（ランダム等）から特定の月日を開く
+function jumpToSameDay(m, d) {
+  sameDayMonth = m; sameDayDay = d;
+  switchTab('onthisday');
+}
+
 async function renderOnThisDay() {
   const container = document.getElementById('onthisday-container');
   const subEl = document.getElementById('onthisday-sub');
   if (!container) return;
+  const today = new Date();
+  if (sameDayMonth === null) { sameDayMonth = today.getMonth() + 1; sameDayDay = today.getDate(); }
+  initSameDayControls_();
   showLoading(container, '探しています...');
 
-  // マイ日記がまだ読み込まれていなければ先に取得（tabの初回表示など）
-  if (!allMyDiaries.length) {
-    try {
-      const res = await Auth.post({ action: 'getMyDiaries', token: Auth.getToken() });
-      if (res.success) allMyDiaries = res.diaries;
-    } catch (e) { /* 下のフィルタで0件表示になる */ }
-  }
+  await ensureMyDiaries();
 
-  const today = new Date();
-  const mm = today.getMonth();
-  const dd = today.getDate();
-  if (subEl) subEl.textContent = `${mm + 1}月${dd}日に書いた日記が、書いた年ごとに新しい順で並びます。`;
+  const isToday = sameDayMonth === today.getMonth() + 1 && sameDayDay === today.getDate();
+  if (subEl) subEl.textContent = `${isToday ? '今日、' : ''}${sameDayMonth}月${sameDayDay}日に書いた日記を、年ごとに並べて見比べられます。`;
 
-  const matches = allMyDiaries
-    .filter(d => {
-      const dt = new Date(d.createdAt);
-      return dt.getMonth() === mm && dt.getDate() === dd;
-    })
-    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)); // 新しい年→古い年
+  const byDate = groupDiariesByDate_(allMyDiaries);
+  const md = `${pad2_(sameDayMonth)}-${pad2_(sameDayDay)}`;
+  const thisYear = today.getFullYear();
+  const allYears = allMyDiaries.map(d => new Date(d.createdAt).getFullYear()).filter(y => !isNaN(y));
 
-  if (!matches.length) {
-    container.innerHTML = '<p class="empty-msg">今日と同じ月日に書いた日記はまだありません。来年、再来年…と積み重ねていきましょう。</p>';
+  if (!allYears.length) {
+    container.innerHTML = '<p class="empty-msg">まだ日記がありません。最初の一筆を綴りましょう。</p>';
     return;
   }
 
-  const thisYear = today.getFullYear();
-  container.innerHTML = matches.map(d => {
-    const y = new Date(d.createdAt).getFullYear();
+  // 最初に日記を書いた年〜今年まで、記録のない年も「空白の年」として並べる
+  const firstYear = Math.min(...allYears);
+  let years = [];
+  for (let y = thisYear; y >= firstYear; y--) years.push(y);
+  if (sameDayOrder === 'asc') years.reverse();
+
+  const hitYears = years.filter(y => byDate[`${y}-${md}`]);
+  const isLeapOnly = sameDayMonth === 2 && sameDayDay === 29;
+
+  const cols = years.map(y => {
+    const key = `${y}-${md}`;
+    const list = byDate[key] || [];
+    const dt = new Date(y, sameDayMonth - 1, sameDayDay);
+    const validDate = dt.getMonth() === sameDayMonth - 1; // 平年の2/29は存在しない
+    const future = validDate && dt > today;
     const yearsAgo = thisYear - y;
+    let bodyHtml;
+    if (list.length) bodyHtml = list.map(recallEntryHtml_).join('');
+    else if (!validDate) bodyHtml = '<div class="rc-empty">この年に2月29日はありません</div>';
+    else if (future) bodyHtml = '<div class="rc-empty">まだこれから。<br>この日が来たら書いてみましょう ✏️</div>';
+    else bodyHtml = '<div class="rc-empty">この年の記録はありません</div>';
     return `
-      <div class="timeline-entry" onclick="openDiaryDetail('${escJsAttr(d.diaryId)}')">
-        <div class="timeline-date">${y}年（${yearsAgo === 0 ? '今年' : yearsAgo + '年前'}）</div>
-        <div class="timeline-mood">${d.mood || '😊'}</div>
-        <div class="timeline-title">${escHtml(d.title)}</div>
-        <div class="timeline-preview">${escHtml((d.content||'').substring(0,80))}…</div>
-      </div>
-    `;
+      <section class="rc-col${list.length ? '' : ' is-empty'}${yearsAgo === 0 ? ' is-this-year' : ''}">
+        <header class="rc-col-head">
+          <span class="rc-year">${y}年</span>
+          ${validDate ? `<span class="rc-wday">（${WDAYS[dt.getDay()]}）</span>` : ''}
+          <span class="rc-ago">${yearsAgo === 0 ? '今年' : yearsAgo + '年前'}</span>
+        </header>
+        ${bodyHtml}
+      </section>`;
   }).join('');
+
+  const summary = hitYears.length
+    ? `<p class="rc-summary">📚 ${years.length}年のうち <strong>${hitYears.length}年分</strong> の記録があります${isLeapOnly ? '（うるう日）' : ''}</p>`
+    : `<p class="rc-summary">この月日の日記はまだありません。「⏩ 記録のある日」で書いた日へ移動できます。</p>`;
+
+  container.innerHTML = summary + `<div class="${columnsClass_()}">${cols}</div>`;
+}
+
+// ===== ランダム（過去の日をランダムに選んで並べる） =====
+let randomCount = 3;
+let lastRandomKeys = [];
+
+function setRandomCount(n) {
+  randomCount = Number(n) || 3;
+  renderRandomDays();
+}
+
+async function renderRandomDays() {
+  const container = document.getElementById('random-container');
+  if (!container) return;
+  showLoading(container, 'ページをめくっています...');
+
+  await ensureMyDiaries();
+
+  const todayKey = localDateKey_(new Date().toISOString());
+  const byDate = groupDiariesByDate_(allMyDiaries);
+  const keys = Object.keys(byDate).filter(k => k < todayKey); // 今日より前＝過去の日だけ
+
+  if (!keys.length) {
+    container.innerHTML = '<p class="empty-msg">過去の日記がまだありません。書き続けると、ここで昔の日がランダムに届きます。</p>';
+    return;
+  }
+
+  // 前回と同じ日ばかり出ないよう、候補が十分あれば前回分を除外
+  let pool = keys;
+  const fresh = keys.filter(k => !lastRandomKeys.includes(k));
+  if (fresh.length >= Math.min(randomCount, keys.length)) pool = fresh;
+
+  // Fisher–Yates シャッフル
+  const shuffled = pool.slice();
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  }
+  const picked = shuffled.slice(0, randomCount).sort().reverse(); // 新しい日→古い日
+  lastRandomKeys = picked;
+
+  const cols = picked.map(k => {
+    const [y, m, d] = k.split('-').map(Number);
+    const dt = new Date(y, m - 1, d);
+    return `
+      <section class="rc-col">
+        <header class="rc-col-head">
+          <span class="rc-year">${y}年${m}月${d}日</span>
+          <span class="rc-wday">（${WDAYS[dt.getDay()]}）</span>
+          <span class="rc-ago">${agoLabel_(k)}</span>
+        </header>
+        ${byDate[k].map(recallEntryHtml_).join('')}
+        <button type="button" class="rc-jump-btn" onclick="jumpToSameDay(${m}, ${d})">📆 毎年の${m}月${d}日を見る</button>
+      </section>`;
+  }).join('');
+
+  const note = keys.length < randomCount
+    ? `<p class="rc-summary">記録のある過去の日は ${keys.length}日分です。</p>`
+    : `<p class="rc-summary">🎲 記録のある ${keys.length}日の中から ${picked.length}日を選びました</p>`;
+
+  container.innerHTML = note + `<div class="${columnsClass_()}">${cols}</div>`;
 }
 
 // ===== 年表 =====

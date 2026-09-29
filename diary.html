@@ -37,6 +37,71 @@
       white-space:pre-wrap; line-height:1.7;
     }
     .voice-transcript-raw { background:#f5f0e6; color:#8a7862; font-size:0.82rem; }
+    /* ===== 同じ日／ランダム：年ごと・日ごとの並列表示 ===== */
+    .rc-controls { display:flex; flex-wrap:wrap; justify-content:space-between; gap:0.6rem; margin-bottom:0.6rem; }
+    .rc-date-nav { display:flex; flex-wrap:wrap; align-items:center; gap:0.4rem; }
+    .rc-btn {
+      background: var(--sub-bg); color: var(--brown); border:1px solid #c9b99a; border-radius:8px;
+      padding:0.4rem 0.7rem; font-size:0.88rem; cursor:pointer; transition: background 0.15s;
+    }
+    .rc-btn:hover { background: var(--light-amber); }
+    .rc-btn.active { background: var(--brown); color: var(--cream); border-color: var(--brown); }
+    .rc-select {
+      padding:0.4rem 0.5rem; border:1px solid #c9b99a; border-radius:8px; background:#fff;
+      font-size:0.95rem; color: var(--sepia);
+    }
+    .rc-count-label { font-size:0.85rem; color:#7a5c4a; display:inline-flex; align-items:center; gap:0.4rem; }
+    .rc-shuffle-btn { padding:0.5rem 1.1rem; }
+    .rc-hint { font-size:0.78rem; color:#8a7862; margin-bottom:1rem; }
+    .rc-summary { font-size:0.88rem; color: var(--brown); margin: 0.25rem 0 0.9rem; }
+
+    .rc-columns {
+      display:flex; gap:0.9rem; overflow-x:auto; padding:0.25rem 0.1rem 0.9rem;
+      scroll-snap-type:x proximity; -webkit-overflow-scrolling:touch;
+    }
+    .rc-col {
+      flex:0 0 270px; scroll-snap-align:start; display:flex; flex-direction:column; gap:0.6rem;
+      background:#fffaf0; border:1px solid #e8d8c4; border-radius:12px; padding:0.85rem;
+      box-shadow: 0 2px 6px rgba(92,64,51,0.08);
+    }
+    .rc-col.is-this-year { border:2px solid var(--amber); }
+    .rc-col.is-empty { background: transparent; border-style:dashed; box-shadow:none; }
+    .rc-col-head {
+      display:flex; align-items:baseline; gap:0.25rem; flex-wrap:wrap;
+      border-bottom:2px solid var(--light-amber); padding-bottom:0.4rem;
+    }
+    .rc-year { font-family:'Shippori Mincho', serif; font-weight:800; font-size:1.15rem; color: var(--brown); }
+    .rc-wday { font-size:0.8rem; color:#7a5c4a; }
+    .rc-ago { margin-left:auto; font-size:0.75rem; background: var(--sub-bg); color: var(--brown); padding:0.1rem 0.5rem; border-radius:10px; }
+    .rc-entry {
+      background:#fff; border-radius:8px; padding:0.65rem 0.75rem; cursor:pointer;
+      border-left:4px solid var(--amber); transition: transform 0.15s;
+    }
+    .rc-entry:hover { transform: translateY(-2px); }
+    .rc-entry-top { display:flex; align-items:center; gap:0.4rem; margin-bottom:0.2rem; }
+    .rc-mood { font-size:1.2rem; }
+    .rc-time { font-size:0.75rem; color:#8a7862; }
+    .rc-badge { font-size:0.72rem; color: var(--brown); }
+    .rc-vis { margin-left:auto; }
+    .rc-title { font-family:'Shippori Mincho', serif; font-weight:600; color: var(--sepia); margin-bottom:0.3rem; }
+    .rc-body { font-size:0.85rem; color:#5a4030; line-height:1.65; white-space:pre-wrap; word-break:break-word; }
+    .rc-empty { font-size:0.82rem; color:#a8957e; text-align:center; padding:1.2rem 0.3rem; line-height:1.7; }
+    .rc-jump-btn {
+      margin-top:auto; background:none; border:1px dashed #c9b99a; border-radius:8px; color: var(--brown);
+      padding:0.4rem; font-size:0.8rem; cursor:pointer;
+    }
+    .rc-jump-btn:hover { background: var(--sub-bg); }
+
+    /* 縦並び */
+    .rc-columns.vertical { flex-direction:column; overflow-x:visible; }
+    .rc-columns.vertical .rc-col { flex:none; }
+    .rc-columns.vertical .rc-col.is-empty { padding:0.5rem 0.85rem; }
+    .rc-columns.vertical .rc-col.is-empty .rc-empty { padding:0.3rem; text-align:left; }
+
+    @media (max-width: 600px) {
+      .rc-col { flex-basis: 82%; }
+      .rc-controls { flex-direction:column; }
+    }
   </style>
 </head>
 <body>
@@ -79,7 +144,8 @@
       <button class="tab-btn active" onclick="switchTab('post')">✏️ 新規投稿</button>
       <button class="tab-btn" onclick="switchTab('mine')">📚 マイ日記</button>
       <button class="tab-btn" onclick="switchTab('timeline')">📅 年表</button>
-      <button class="tab-btn" onclick="switchTab('onthisday')">📆 今日は</button>
+      <button class="tab-btn" onclick="switchTab('onthisday')">📆 同じ日</button>
+      <button class="tab-btn" onclick="switchTab('random')">🎲 ランダム</button>
     </div>
 
     <!-- ===== 新規投稿 ===== -->
@@ -149,12 +215,55 @@
       </div>
     </div>
 
-    <!-- ===== 今日は（同じ月日を年別に） ===== -->
+    <!-- ===== 同じ日（毎年の同じ月日を年ごとに並べる） ===== -->
     <div id="tab-onthisday" class="tab-content" style="display:none">
-      <h2 class="section-title">📆 今日という日</h2>
-      <p style="color:#7a5c4a;font-size:0.88rem;margin-bottom:1.5rem;line-height:1.7;" id="onthisday-sub"></p>
-      <div id="onthisday-container" class="timeline-container">
+      <h2 class="section-title">📆 毎年の同じ日</h2>
+      <p style="color:#7a5c4a;font-size:0.88rem;margin-bottom:1rem;line-height:1.7;" id="onthisday-sub"></p>
+      <div class="rc-controls">
+        <div class="rc-date-nav">
+          <button type="button" class="rc-btn" onclick="jumpSameDayWithRecord(-1)" title="記録のある前の日">⏪</button>
+          <button type="button" class="rc-btn" onclick="shiftSameDay(-1)" title="前の日">◀</button>
+          <select id="sd-month" class="rc-select" onchange="onSameDaySelect()"></select>
+          <select id="sd-day" class="rc-select" onchange="onSameDaySelect()"></select>
+          <button type="button" class="rc-btn" onclick="shiftSameDay(1)" title="次の日">▶</button>
+          <button type="button" class="rc-btn" onclick="jumpSameDayWithRecord(1)" title="記録のある次の日">⏩</button>
+        </div>
+        <div class="rc-date-nav">
+          <button type="button" class="rc-btn" onclick="resetSameDayToday()">📍 今日</button>
+          <button type="button" class="rc-btn" id="sd-order-btn" onclick="toggleSameDayOrder()">⇅ 新しい年から</button>
+          <button type="button" class="rc-btn rc-layout-btn active" data-layout="row" onclick="setRecallLayout('row')">↔ 横並び</button>
+          <button type="button" class="rc-btn rc-layout-btn" data-layout="col" onclick="setRecallLayout('col')">↕ 縦並び</button>
+        </div>
+      </div>
+      <p class="rc-hint">◀▶で1日ずつ、⏪⏩で日記を書いたことのある日へ移動します。</p>
+      <div id="onthisday-container">
         <div class="loading-msg"><span class="loading-spinner"></span>探しています...</div>
+      </div>
+    </div>
+
+    <!-- ===== ランダム（過去の日をランダムに並べる） ===== -->
+    <div id="tab-random" class="tab-content" style="display:none">
+      <h2 class="section-title">🎲 あの日をランダムに</h2>
+      <p style="color:#7a5c4a;font-size:0.88rem;margin-bottom:1rem;line-height:1.7;">過去に日記を書いた日の中から、ランダムに選んで並べます。思いがけない一日に再会できるかもしれません。</p>
+      <div class="rc-controls">
+        <div class="rc-date-nav">
+          <button type="button" class="btn-primary rc-shuffle-btn" onclick="renderRandomDays()">🎲 別の日を引く</button>
+          <label class="rc-count-label">表示する日数
+            <select class="rc-select" onchange="setRandomCount(this.value)">
+              <option value="1">1日</option>
+              <option value="3" selected>3日</option>
+              <option value="5">5日</option>
+              <option value="7">7日</option>
+            </select>
+          </label>
+        </div>
+        <div class="rc-date-nav">
+          <button type="button" class="rc-btn rc-layout-btn active" data-layout="row" onclick="setRecallLayout('row')">↔ 横並び</button>
+          <button type="button" class="rc-btn rc-layout-btn" data-layout="col" onclick="setRecallLayout('col')">↕ 縦並び</button>
+        </div>
+      </div>
+      <div id="random-container">
+        <div class="loading-msg"><span class="loading-spinner"></span>ページをめくっています...</div>
       </div>
     </div>
   </div>
@@ -285,7 +394,7 @@ let activeTab = 'post';
 
 function switchTab(tab) {
   document.querySelectorAll('.tab-btn').forEach((btn,i) => {
-    btn.classList.toggle('active', ['post','mine','timeline','onthisday'][i] === tab);
+    btn.classList.toggle('active', ['post','mine','timeline','onthisday','random'][i] === tab);
   });
   document.querySelectorAll('.tab-content').forEach(el => el.style.display = 'none');
   document.getElementById('tab-' + tab).style.display = 'block';
@@ -293,6 +402,7 @@ function switchTab(tab) {
   if (tab === 'mine') loadMyDiaries();
   if (tab === 'timeline') renderTimeline();
   if (tab === 'onthisday') renderOnThisDay();
+  if (tab === 'random') renderRandomDays();
 }
 
 document.addEventListener('DOMContentLoaded', () => {

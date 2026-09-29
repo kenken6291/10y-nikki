@@ -656,16 +656,22 @@ function backToSameDay() { recallMode = 'sameday'; renderOnThisDay(); }
 function calShift(months) {
   const dt = new Date(calYear, calMonth - 1 + months, 1);
   calYear = dt.getFullYear(); calMonth = dt.getMonth() + 1;
-  renderRecallSidebar_();
+  renderAllSidebars_();
 }
 function calToday() {
   const t = new Date();
+  if (activeTab === 'photos') { calYear = t.getFullYear(); calMonth = t.getMonth() + 1; renderAllSidebars_(); return; }
   selectSameDay(t.getFullYear(), t.getMonth() + 1, t.getDate());
 }
 
 function toggleArchive() {
   archiveOpen = !archiveOpen;
+  renderAllSidebars_();
+}
+
+function renderAllSidebars_() {
   renderRecallSidebar_();
+  renderRecallSidebar_('photos');
 }
 
 async function renderOnThisDay() {
@@ -736,10 +742,15 @@ async function renderOnThisDay() {
 }
 
 // サイドバー（カレンダー＋月別アーカイブ）
-function renderRecallSidebar_() {
-  const side = document.getElementById('recall-sidebar');
+// mode='diary'  … 同じ日タブ用（日記のある日を太字、日付クリックでその日の毎年を表示、月クリックで月別タイムライン）
+// mode='photos' … 写真タブ用（写真のある日を太字、日付クリックで同じ日タブへ、月クリックでその月の写真へ移動）
+function renderRecallSidebar_(mode = 'diary') {
+  const side = document.getElementById(mode === 'photos' ? 'photos-sidebar' : 'recall-sidebar');
   if (!side) return;
-  const byDate = groupDiariesByDate_(allMyDiaries);
+  initSameDayState_();
+  const isPhotos = mode === 'photos';
+  const source = isPhotos ? allMyDiaries.filter(d => parsePhotos(d.photos).length) : allMyDiaries;
+  const byDate = groupDiariesByDate_(source);
   const t = new Date();
   const todayKey = localDateKey_(t.toISOString());
 
@@ -758,21 +769,25 @@ function renderRecallSidebar_() {
     if (dt.getDay() === 6) cls.push('sat');
     if (byDate[key]) cls.push('has');
     if (key === todayKey) cls.push('today');
-    if (recallMode === 'sameday' && m === sameDayMonth && d === sameDayDay) cls.push('selected');
-    cells += `<button type="button" class="${cls.join(' ')}" onclick="selectSameDay(${y}, ${m}, ${d})">${d}</button>`;
+    if (!isPhotos && recallMode === 'sameday' && m === sameDayMonth && d === sameDayDay) cls.push('selected');
+    const onclick = isPhotos
+      ? (byDate[key] ? `photoScrollToDate('${key}')` : `jumpToSameDay(${m}, ${d})`)
+      : `selectSameDay(${y}, ${m}, ${d})`;
+    cells += `<button type="button" class="${cls.join(' ')}" onclick="${onclick}">${d}</button>`;
   }
 
-  // --- 月別アーカイブ（件数つき・新しい月から） ---
+  // --- 月別アーカイブ（件数つき・新しい月から）。写真タブでは写真の枚数 ---
   const monthCount = {};
-  allMyDiaries.forEach(d => {
+  source.forEach(d => {
     const k = localDateKey_(d.createdAt).slice(0, 7);
-    if (k) monthCount[k] = (monthCount[k] || 0) + 1;
+    if (k) monthCount[k] = (monthCount[k] || 0) + (isPhotos ? parsePhotos(d.photos).length : 1);
   });
   const months = Object.keys(monthCount).sort().reverse();
   const archive = months.map(k => {
     const [y, m] = k.split('-').map(Number);
-    const active = recallMode === 'month' && recallYM && recallYM.y === y && recallYM.m === m;
-    return `<button type="button" class="rc-arc-row${active ? ' active' : ''}" onclick="openRecallMonth(${y}, ${m})">
+    const active = !isPhotos && recallMode === 'month' && recallYM && recallYM.y === y && recallYM.m === m;
+    const onclick = isPhotos ? `photoScrollToMonth(${y}, ${m})` : `openRecallMonth(${y}, ${m})`;
+    return `<button type="button" class="rc-arc-row${active ? ' active' : ''}" onclick="${onclick}">
       <span>${y}年${m}月</span><span class="rc-arc-count">${monthCount[k]}</span></button>`;
   }).join('');
 
@@ -795,10 +810,113 @@ function renderRecallSidebar_() {
     </div>
     <div class="rc-panel">
       <button type="button" class="rc-panel-head" onclick="toggleArchive()">
-        <span>日記</span><span>${archiveOpen ? '▾' : '▸'}</span>
+        <span>${isPhotos ? '写真' : '日記'}</span><span>${archiveOpen ? '▾' : '▸'}</span>
       </button>
-      ${archiveOpen ? (archive || '<div class="rc-arc-empty">まだ日記がありません</div>') : ''}
+      ${archiveOpen ? (archive || `<div class="rc-arc-empty">まだ${isPhotos ? '写真' : '日記'}がありません</div>`) : ''}
     </div>`;
+}
+
+// ===== 写真（年月ごとに写真を並べる） =====
+// 写真はGAS経由で1枚ずつ取得するため、画面に見えてきたものから順に読み込む
+let photoObserver = null;
+let photoQueue = [];
+let photoLoading = 0;
+const PHOTO_PARALLEL = 3;
+
+async function renderPhotosTab() {
+  const container = document.getElementById('photos-container');
+  if (!container) return;
+  initSameDayState_();
+  showLoading(container, '写真を集めています...');
+  await ensureMyDiaries();
+  renderRecallSidebar_('photos');
+
+  // 写真1枚ごとの一覧（新しい日→古い日、同じ日記の中は並び順どおり）
+  const items = [];
+  allMyDiaries.forEach(d => {
+    const key = localDateKey_(d.createdAt);
+    if (!key) return;
+    parsePhotos(d.photos).forEach((p, i) => items.push({ key, diaryId: d.diaryId, fileId: p.fileId, idx: i, t: new Date(d.createdAt).getTime() }));
+  });
+  if (!items.length) {
+    container.innerHTML = '<p class="empty-msg">まだ写真がありません。日記に写真を添えると、ここに年月ごとに並びます。</p>';
+    return;
+  }
+  items.sort((a, b) => b.t - a.t || a.idx - b.idx);
+
+  const byMonth = {};
+  items.forEach(it => { (byMonth[it.key.slice(0, 7)] = byMonth[it.key.slice(0, 7)] || []).push(it); });
+
+  let seq = 0;
+  container.innerHTML = Object.keys(byMonth).sort().reverse().map(ym => {
+    const [y, m] = ym.split('-').map(Number);
+    return `
+      <section class="ph-month" id="ph-month-${ym}">
+        <h3 class="ph-month-title">${y}年${m}月</h3>
+        <div class="ph-grid">
+          ${byMonth[ym].map(it => {
+            const day = Number(it.key.slice(8, 10));
+            return `<button type="button" class="ph-cell loading" id="ph-${++seq}" data-key="${it.key}"
+                      data-diary="${escHtml(it.diaryId)}" data-file="${escHtml(it.fileId)}"
+                      onclick="openDiaryDetail(this.dataset.diary)" title="${it.key}">
+                      <span class="ph-day">${day}</span></button>`;
+          }).join('')}
+        </div>
+      </section>`;
+  }).join('');
+
+  setupPhotoLazyLoad_(container);
+}
+
+function setupPhotoLazyLoad_(container) {
+  if (photoObserver) photoObserver.disconnect();
+  photoQueue = [];
+  const cells = container.querySelectorAll('.ph-cell.loading');
+  if (!('IntersectionObserver' in window)) { cells.forEach(enqueuePhoto_); return; }
+  photoObserver = new IntersectionObserver(entries => {
+    entries.forEach(en => {
+      if (!en.isIntersecting) return;
+      photoObserver.unobserve(en.target);
+      enqueuePhoto_(en.target);
+    });
+  }, { rootMargin: '300px 0px' });
+  cells.forEach(c => photoObserver.observe(c));
+}
+
+function enqueuePhoto_(cell) {
+  photoQueue.push(cell);
+  pumpPhotoQueue_();
+}
+
+function pumpPhotoQueue_() {
+  while (photoLoading < PHOTO_PARALLEL && photoQueue.length) {
+    const cell = photoQueue.shift();
+    if (!cell.isConnected) continue; // 描き直しで消えたもの
+    photoLoading++;
+    fetchPhoto(cell.dataset.diary, cell.dataset.file).then(dataUri => {
+      if (!cell.isConnected) return;
+      cell.classList.remove('loading');
+      if (!dataUri) { cell.classList.add('broken'); return; }
+      const img = document.createElement('img');
+      img.src = dataUri; img.alt = '';
+      cell.insertBefore(img, cell.firstChild);
+    }).finally(() => { photoLoading--; pumpPhotoQueue_(); });
+  }
+}
+
+function photoScrollToMonth(y, m) {
+  const el = document.getElementById(`ph-month-${y}-${pad2_(m)}`);
+  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  calYear = y; calMonth = m;
+  renderRecallSidebar_('photos');
+}
+
+function photoScrollToDate(key) {
+  const cell = document.querySelector(`#photos-container .ph-cell[data-key="${key}"]`);
+  if (!cell) return;
+  cell.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  document.querySelectorAll('#photos-container .ph-cell.flash').forEach(c => c.classList.remove('flash'));
+  document.querySelectorAll(`#photos-container .ph-cell[data-key="${key}"]`).forEach(c => c.classList.add('flash'));
 }
 
 // ===== ランダム（過去の日をランダムに選んでタイムライン形式で並べる） =====

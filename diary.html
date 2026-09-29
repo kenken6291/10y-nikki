@@ -141,6 +141,83 @@
       .rc-photo { width:calc(33% - 0.3rem); height:auto; aspect-ratio:1; }
       .rc-tl-date { font-size:1.5rem; }
     }
+    /* ===== 取り込み ===== */
+    .im-lead { font-size:0.88rem; color:#7a5c4a; line-height:1.8; margin-bottom:0.8rem; }
+    .im-common { font-size:0.88rem; color: var(--brown); margin-bottom:1rem; }
+    .im-year { width:5.5rem; padding:0.3rem 0.4rem; border:1px solid #c9b99a; border-radius:6px; }
+    .im-methods { display:grid; grid-template-columns:repeat(auto-fit, minmax(240px, 1fr)); gap:0.9rem; margin-bottom:1.2rem; }
+    .im-card { background:#fffaf0; border:1px solid #e8d8c4; border-radius:12px; padding:1rem; display:flex; flex-direction:column; gap:0.6rem; }
+    .im-card h3 { font-size:1rem; color: var(--brown); margin:0; }
+    .im-card p { font-size:0.8rem; color:#7a5c4a; line-height:1.7; margin:0; }
+    .im-card textarea { width:100%; box-sizing:border-box; font-size:0.85rem; padding:0.5rem; border:1px solid #c9b99a; border-radius:6px; }
+    .im-file-btn { display:inline-block; text-align:center; cursor:pointer; }
+    .im-linkish { background:none; border:none; color:#3a6ea5; text-decoration:underline; font-size:0.8rem; cursor:pointer; padding:0; align-self:flex-start; }
+    .im-status { font-size:0.8rem !important; color: var(--brown) !important; }
+    .im-check { font-size:0.85rem; color: var(--brown); display:inline-flex; align-items:center; gap:0.3rem; cursor:pointer; }
+    .im-result { font-weight:bold; color: var(--brown); }
+
+    .im-toolbar { position:sticky; top:3.6rem; z-index:5; background: var(--cream); padding:0.6rem 0; border-bottom:2px solid var(--light-amber); margin-bottom:0.8rem; font-size:0.9rem; }
+    .im-toolbar-btns { display:flex; flex-wrap:wrap; gap:0.35rem; margin-top:0.4rem; }
+    .im-toolbar .rc-btn { font-size:0.78rem; padding:0.3rem 0.6rem; }
+    .im-bulk-photo { cursor:pointer; }
+    .im-warn-text { color:#b0271c; font-weight:bold; }
+
+    .im-row { background:#fff; border:1px solid #e0d2bd; border-left:4px solid var(--amber); border-radius:8px; padding:0.7rem; margin-bottom:0.7rem; display:flex; flex-direction:column; gap:0.45rem; }
+    .im-row.excluded { opacity:0.45; border-left-color:#ccc; }
+    .im-row.has-error { border-left-color:#b0271c; }
+    .im-row-head, .im-row-foot { display:flex; flex-wrap:wrap; align-items:center; gap:0.5rem; }
+    .im-date, .im-time, .im-title, .im-tags, .im-content, .im-row select {
+      border:1px solid #c9b99a; border-radius:6px; padding:0.35rem 0.45rem; font-size:0.9rem; background:#fff; color: var(--sepia);
+    }
+    .im-title { font-weight:bold; }
+    .im-content { width:100%; box-sizing:border-box; line-height:1.7; resize:vertical; }
+    .im-tags { flex:1; min-width:8rem; }
+    .im-src { font-size:0.72rem; background: var(--sub-bg); color: var(--brown); padding:0.1rem 0.5rem; border-radius:10px; }
+    .im-del { margin-left:auto; background:none; border:none; color:#a8957e; font-size:1rem; cursor:pointer; }
+    .im-del:hover { color:#b0271c; }
+    .im-warns { display:flex; flex-wrap:wrap; gap:0.4rem; }
+    .im-warn { font-size:0.75rem; color:#b0271c; background:#fdecea; padding:0.1rem 0.5rem; border-radius:6px; }
+    .im-warn-soft { color:#8a5a00; background:#fff3dc; }
+    .im-photos { display:flex; flex-wrap:wrap; gap:0.4rem; align-items:center; }
+    .im-photo { position:relative; width:70px; height:70px; }
+    .im-photo img { width:100%; height:100%; object-fit:cover; border-radius:6px; }
+    .im-photo button { position:absolute; top:-6px; right:-6px; width:20px; height:20px; border-radius:50%; border:none; background:#5c4033; color:#fff; font-size:0.7rem; cursor:pointer; }
+    .im-photo-add { font-size:0.78rem; color: var(--brown); border:1px dashed #c9b99a; border-radius:6px; padding:0.4rem 0.6rem; cursor:pointer; }
+    .im-photo-add:hover { background: var(--sub-bg); }
+
+    .im-submit { text-align:center; padding:1rem 0 2rem; }
+    .im-progress { height:10px; background: var(--sub-bg); border-radius:5px; overflow:hidden; margin-bottom:0.4rem; }
+    #im-progress-bar { height:100%; width:0; background: var(--amber); transition: width 0.3s; }
+    .im-progress-text { font-size:0.85rem; color: var(--brown); min-height:1.2em; }
+    @media (max-width: 600px) {
+      .im-toolbar { top:3rem; }
+      .im-title { width:100%; box-sizing:border-box; }
+    }
+    /* ===== 写真（年月ごと） ===== */
+    .ph-month { margin-bottom:0.4rem; }
+    .ph-month-title {
+      text-align:center; font-size:0.9rem; font-weight:400; color: var(--sepia);
+      border:1px solid #ddd; background:#fff; padding:0.25rem; margin:0 0 3px;
+    }
+    .ph-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(104px, 1fr)); gap:3px; margin-bottom:0.3rem; }
+    .ph-cell {
+      position:relative; aspect-ratio:1; border:none; padding:0; overflow:hidden; cursor:pointer; background:#ede2d0;
+    }
+    .ph-cell img { width:100%; height:100%; object-fit:cover; display:block; transition: transform 0.2s; }
+    .ph-cell:hover img { transform: scale(1.05); }
+    .ph-cell.loading {
+      background: linear-gradient(90deg, #ede2d0 25%, #f5ecdd 37%, #ede2d0 63%);
+      background-size:400% 100%; animation: photo-shimmer 1.4s ease infinite;
+    }
+    .ph-cell.broken::after { content:'📷'; position:absolute; inset:0; display:flex; align-items:center; justify-content:center; opacity:0.4; }
+    .ph-cell.flash { outline:3px solid #ff4a0f; outline-offset:-3px; }
+    .ph-day {
+      position:absolute; right:5px; bottom:2px; color:#fff; font-size:1.05rem; font-weight:bold;
+      text-shadow: 0 0 3px rgba(0,0,0,0.8), 0 0 6px rgba(0,0,0,0.5);
+    }
+    @media (max-width: 600px) {
+      .ph-grid { grid-template-columns:repeat(3, 1fr); }
+    }
   </style>
 </head>
 <body>
@@ -183,8 +260,10 @@
       <button class="tab-btn active" onclick="switchTab('post')">✏️ 新規投稿</button>
       <button class="tab-btn" onclick="switchTab('mine')">📚 マイ日記</button>
       <button class="tab-btn" onclick="switchTab('timeline')">📅 年表</button>
+      <button class="tab-btn" onclick="switchTab('photos')">📷 写真</button>
       <button class="tab-btn" onclick="switchTab('onthisday')">📆 同じ日</button>
       <button class="tab-btn" onclick="switchTab('random')">🎲 ランダム</button>
+      <button class="tab-btn" onclick="switchTab('import')">📥 取り込み</button>
     </div>
 
     <!-- ===== 新規投稿 ===== -->
@@ -254,6 +333,16 @@
       </div>
     </div>
 
+    <!-- ===== 写真（年月ごとに並べる） ===== -->
+    <div id="tab-photos" class="tab-content" style="display:none">
+      <div class="rc-layout">
+        <div class="rc-main" id="photos-container">
+          <div class="loading-msg"><span class="loading-spinner"></span>写真を集めています...</div>
+        </div>
+        <aside id="photos-sidebar" class="rc-side"></aside>
+      </div>
+    </div>
+
     <!-- ===== 同じ日（10年日記形式：毎年の同じ日を縦に並べる＋カレンダー） ===== -->
     <div id="tab-onthisday" class="tab-content" style="display:none">
       <div class="rc-layout">
@@ -290,6 +379,47 @@
       <div id="random-container">
         <div class="loading-msg"><span class="loading-spinner"></span>ページをめくっています...</div>
       </div>
+    </div>
+
+    <!-- ===== 取り込み（ファイル / 貼り付け / 写真） ===== -->
+    <div id="tab-import" class="tab-content" style="display:none">
+      <h2 class="section-title">📥 日記を取り込む</h2>
+      <p class="im-lead">ほかの日記アプリのデータや、紙の日記の写真から、過去の日記をまとめて取り込めます。読み込んだ内容は下の一覧で確認・修正してから保存します。<br>取り込んだ日記は、はじめは <strong>🔒 非公開</strong> になります（一覧で変更できます）。</p>
+
+      <div class="im-common">
+        <label>年が書かれていない日付は <input type="number" id="im-default-year" min="1900" max="2100" class="im-year"> 年として読む</label>
+      </div>
+
+      <div class="im-methods">
+        <div class="im-card">
+          <h3>📄 ファイルから</h3>
+          <p>CSV・JSON・テキストファイルに対応しています。CSVは「日付・タイトル・本文・気分・タグ・公開」の列を読み取ります（タイトルが無ければ本文の1行目を使います）。</p>
+          <label class="btn-primary im-file-btn">ファイルを選ぶ
+            <input type="file" accept=".csv,.tsv,.json,.txt,text/*,application/json" multiple hidden onchange="imHandleFile(event)">
+          </label>
+          <button type="button" class="im-linkish" onclick="imDownloadSample()">CSVのひな形をダウンロード</button>
+        </div>
+
+        <div class="im-card">
+          <h3>📋 貼り付けて</h3>
+          <p>ほかの日記サイトのタイムライン画面などをコピーして貼り付けてください。「2026年8月9日」のような日付の行ごとに日記を分けます。</p>
+          <textarea id="im-paste" rows="5" placeholder="2026年8月9日&#10;神奈川県 川崎市 26°C&#10;卓球の大会を見に行った。&#10;日曜日&#10;&#10;2026年8月10日&#10;…"></textarea>
+          <button type="button" class="btn-primary" onclick="imHandlePaste()">読み取る</button>
+        </div>
+
+        <div class="im-card">
+          <h3>📷 写真から</h3>
+          <p>手書きの日記帳・紙の10年日記・日記アプリの画面のスクリーンショットをAIが読み取ります。1枚に何日分・何年分あっても分けて読み取ります。</p>
+          <label class="im-check"><input type="checkbox" id="im-attach-original"> 読み取った写真も日記に添付する</label>
+          <label class="btn-primary im-file-btn">写真を選ぶ
+            <input type="file" accept="image/*" multiple hidden onchange="imHandleImages(event)">
+          </label>
+          <p id="im-photo-status" class="im-status"></p>
+        </div>
+      </div>
+
+      <p id="im-result" class="im-result"></p>
+      <div id="im-preview"></div>
     </div>
   </div>
 </div>
@@ -414,22 +544,25 @@
 <script src="js/config.js"></script>
 <script src="js/auth.js"></script>
 <script src="js/diary.js"></script>
+<script src="js/import.js"></script>
 <script>
 let activeTab = 'post';
 
 function switchTab(tab) {
   document.querySelectorAll('.tab-btn').forEach((btn,i) => {
-    btn.classList.toggle('active', ['post','mine','timeline','onthisday','random'][i] === tab);
+    btn.classList.toggle('active', ['post','mine','timeline','photos','onthisday','random','import'][i] === tab);
   });
   document.querySelectorAll('.tab-content').forEach(el => el.style.display = 'none');
   document.getElementById('tab-' + tab).style.display = 'block';
   activeTab = tab;
-  // 「同じ日」はカレンダー用サイドバーがあるので横幅を広げる
-  document.querySelector('.page-wrapper').classList.toggle('wide', tab === 'onthisday');
+  // 「同じ日」「写真」はカレンダー用サイドバーがあるので横幅を広げる
+  document.querySelector('.page-wrapper').classList.toggle('wide', tab === 'onthisday' || tab === 'photos');
   if (tab === 'mine') loadMyDiaries();
   if (tab === 'timeline') renderTimeline();
   if (tab === 'onthisday') renderOnThisDay();
   if (tab === 'random') renderRandomDays();
+  if (tab === 'photos') renderPhotosTab();
+  if (tab === 'import') renderImportTab();
 }
 
 document.addEventListener('DOMContentLoaded', () => {

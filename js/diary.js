@@ -510,7 +510,7 @@ async function ensureMyDiaries(force = false) {
 
 // ===== 振り返り表示の共通ヘルパー =====
 const WDAYS = ['日','月','火','水','木','金','土'];
-let recallLayout = 'row'; // 'row'=横並び / 'col'=縦並び
+const WDAYS_LONG = ['日曜日','月曜日','火曜日','水曜日','木曜日','金曜日','土曜日'];
 
 function pad2_(n) { return String(n).padStart(2, '0'); }
 
@@ -548,165 +548,260 @@ function agoLabel_(dateKey) {
   return `${Math.max(1, months)}か月前`;
 }
 
-// 1件分の日記カード（列の中に縦に積む）
-function recallEntryHtml_(d) {
-  const photoCount = parsePhotos(d.photos).length;
-  const body = (d.content || '');
-  const preview = body.length > 180 ? body.substring(0, 180) + '…' : body;
-  const time = new Date(d.createdAt);
+// 振り返り表示専用の写真ギャラリー
+// （マイ日記タブ等と同じ日記を同時に描画してもIDが重複しないよう、表示ごとに接頭辞を分ける）
+let rcGallerySeq = 0;
+function rcGalleryHtml_(d) {
+  const list = parsePhotos(d.photos);
+  if (!list.length) return '';
+  const prefix = `rcg${++rcGallerySeq}`;
+  setTimeout(async () => {
+    for (let i = 0; i < list.length; i++) {
+      const el = document.getElementById(`${prefix}-${i}`);
+      if (!el) continue;
+      const dataUri = await fetchPhoto(d.diaryId, list[i].fileId);
+      if (!dataUri) { el.remove(); continue; }
+      el.classList.remove('loading');
+      el.innerHTML = `<img src="${dataUri}" alt="" onclick="event.stopPropagation();openPhotoLightbox(this.src)">`;
+    }
+  }, 0);
+  return `<div class="rc-photos">${list.map((_, i) => `<div class="rc-photo loading" id="${prefix}-${i}"></div>`).join('')}</div>`;
+}
+
+// 日記1件の中身（タイトル・本文・写真）
+function rcDiaryContentHtml_(d) {
   return `
-    <div class="rc-entry" onclick="openDiaryDetail('${escJsAttr(d.diaryId)}')">
-      <div class="rc-entry-top">
-        <span class="rc-mood">${d.mood || '😊'}</span>
-        <span class="rc-time">${pad2_(time.getHours())}:${pad2_(time.getMinutes())}</span>
-        ${photoCount ? `<span class="rc-badge">📷 ${photoCount}</span>` : ''}
-        <span class="rc-badge rc-vis">${d.isPublic ? '🌐' : '🔒'}</span>
-      </div>
-      <div class="rc-title">${escHtml(d.title)}</div>
-      <div class="rc-body">${escHtml(preview)}</div>
+    <div class="rc-diary" onclick="event.stopPropagation();openDiaryDetail('${escJsAttr(d.diaryId)}')">
+      <div class="rc-diary-title">${escHtml(d.title)}${d.isPublic ? '' : ' <span class="rc-lock">🔒</span>'}</div>
+      <div class="rc-diary-body">${escHtml(d.content || '')}</div>
+      ${rcGalleryHtml_(d)}
       ${d.tags ? `<div class="card-tags">${d.tags.split(',').filter(t => t.trim()).map(t => `<span class="tag">${escHtml(t.trim())}</span>`).join('')}</div>` : ''}
     </div>`;
 }
 
-function setRecallLayout(layout) {
-  recallLayout = layout;
-  document.querySelectorAll('.rc-columns').forEach(el => el.classList.toggle('vertical', layout === 'col'));
-  document.querySelectorAll('.rc-layout-btn').forEach(b => b.classList.toggle('active', b.dataset.layout === layout));
+// タイムライン形式（大きな日付見出し＋本文＋写真＋曜日）で1日分を描画
+function rcTimelineDayHtml_(dateKey, list, opts = {}) {
+  const [y, m, d] = dateKey.split('-').map(Number);
+  const dt = new Date(y, m - 1, d);
+  const moods = list.map(x => x.mood || '😊').join(' ');
+  return `
+    <article class="rc-tl-item">
+      <h3 class="rc-tl-date">${y}年${m}月${d}日${opts.showAgo ? `<span class="rc-tl-ago">${agoLabel_(dateKey)}</span>` : ''}</h3>
+      ${list.map(rcDiaryContentHtml_).join('<hr class="rc-sep">')}
+      <div class="rc-foot">
+        <span>${WDAYS_LONG[dt.getDay()]}</span><span class="rc-foot-mood">${moods}</span>
+        ${opts.showJump ? `<button type="button" class="rc-link-btn" onclick="jumpToSameDay(${m}, ${d})">📆 毎年の${m}月${d}日を見る</button>` : ''}
+      </div>
+    </article>`;
 }
 
-function columnsClass_() { return 'rc-columns' + (recallLayout === 'col' ? ' vertical' : ''); }
+// ===== 同じ日タブ（10年日記形式＋カレンダー＋月別アーカイブ） =====
+let sameDayMonth = null;   // 1-12
+let sameDayDay   = null;   // 1-31
+let recallMode   = 'sameday'; // 'sameday'=毎年の同じ日 / 'month'=月別タイムライン
+let recallYM     = null;   // month表示中の {y, m}
+let calYear = null, calMonth = null; // サイドバーのカレンダー表示中の年月
+let archiveOpen = true;
 
-// ===== 同じ日（毎年の同じ月日を年ごとに横並び） =====
-let sameDayMonth = null; // 1-12
-let sameDayDay   = null; // 1-31
-let sameDayOrder = 'desc'; // desc=新しい年から / asc=古い年から
-
-function daysInMonth_(m) { return new Date(2024, m, 0).getDate(); } // 2024年はうるう年＝2/29も選べる
-
-function initSameDayControls_() {
-  const mSel = document.getElementById('sd-month');
-  const dSel = document.getElementById('sd-day');
-  if (!mSel || !dSel) return;
-  if (!mSel.options.length) {
-    mSel.innerHTML = Array.from({ length: 12 }, (_, i) => `<option value="${i + 1}">${i + 1}月</option>`).join('');
-  }
-  mSel.value = String(sameDayMonth);
-  const max = daysInMonth_(sameDayMonth);
-  if (sameDayDay > max) sameDayDay = max;
-  dSel.innerHTML = Array.from({ length: max }, (_, i) => `<option value="${i + 1}">${i + 1}日</option>`).join('');
-  dSel.value = String(sameDayDay);
+function initSameDayState_() {
+  const t = new Date();
+  if (sameDayMonth === null) { sameDayMonth = t.getMonth() + 1; sameDayDay = t.getDate(); }
+  if (calYear === null) { calYear = t.getFullYear(); calMonth = t.getMonth() + 1; }
 }
 
-function onSameDaySelect() {
-  sameDayMonth = Number(document.getElementById('sd-month').value);
-  sameDayDay   = Number(document.getElementById('sd-day').value);
-  renderOnThisDay();
-}
+// 見出しの < > ボタン
+function recallPrev() { recallMode === 'month' ? shiftRecallMonth(-1) : shiftSameDay(-1); }
+function recallNext() { recallMode === 'month' ? shiftRecallMonth(1)  : shiftSameDay(1); }
 
 function shiftSameDay(delta) {
-  const dt = new Date(2024, sameDayMonth - 1, sameDayDay + delta);
+  const dt = new Date(2024, sameDayMonth - 1, sameDayDay + delta); // 2024年＝うるう年なので2/29も通る
   sameDayMonth = dt.getMonth() + 1;
   sameDayDay   = dt.getDate();
+  calMonth = sameDayMonth; // カレンダーも追従
   renderOnThisDay();
 }
 
-// 記録のある前後の月日へジャンプ（年は問わず、月日だけで判定）
-function jumpSameDayWithRecord(dir) {
-  const mdSet = [...new Set(allMyDiaries.map(d => localDateKey_(d.createdAt).slice(5)).filter(Boolean))].sort();
-  if (!mdSet.length) { showToast('まだ日記がありません', 'error'); return; }
-  const cur = `${pad2_(sameDayMonth)}-${pad2_(sameDayDay)}`;
-  let target;
-  if (dir > 0) target = mdSet.find(md => md > cur) || mdSet[0];
-  else target = [...mdSet].reverse().find(md => md < cur) || mdSet[mdSet.length - 1];
-  const [m, d] = target.split('-').map(Number);
+function selectSameDay(y, m, d) {
   sameDayMonth = m; sameDayDay = d;
-  renderOnThisDay();
-}
-
-function resetSameDayToday() {
-  const t = new Date();
-  sameDayMonth = t.getMonth() + 1;
-  sameDayDay   = t.getDate();
-  renderOnThisDay();
-}
-
-function toggleSameDayOrder() {
-  sameDayOrder = sameDayOrder === 'desc' ? 'asc' : 'desc';
-  const b = document.getElementById('sd-order-btn');
-  if (b) b.textContent = sameDayOrder === 'desc' ? '⇅ 新しい年から' : '⇅ 古い年から';
+  calYear = y; calMonth = m;
+  recallMode = 'sameday';
   renderOnThisDay();
 }
 
 // 別タブ（ランダム等）から特定の月日を開く
 function jumpToSameDay(m, d) {
   sameDayMonth = m; sameDayDay = d;
+  calMonth = m;
+  recallMode = 'sameday';
   switchTab('onthisday');
+}
+
+function openRecallMonth(y, m) {
+  recallMode = 'month';
+  recallYM = { y, m };
+  calYear = y; calMonth = m;
+  renderOnThisDay();
+  const main = document.getElementById('onthisday-container');
+  if (main) main.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function shiftRecallMonth(delta) {
+  const dt = new Date(recallYM.y, recallYM.m - 1 + delta, 1);
+  openRecallMonth(dt.getFullYear(), dt.getMonth() + 1);
+}
+
+function backToSameDay() { recallMode = 'sameday'; renderOnThisDay(); }
+
+// カレンダー操作（<< >> は1年、< > は1か月）
+function calShift(months) {
+  const dt = new Date(calYear, calMonth - 1 + months, 1);
+  calYear = dt.getFullYear(); calMonth = dt.getMonth() + 1;
+  renderRecallSidebar_();
+}
+function calToday() {
+  const t = new Date();
+  selectSameDay(t.getFullYear(), t.getMonth() + 1, t.getDate());
+}
+
+function toggleArchive() {
+  archiveOpen = !archiveOpen;
+  renderRecallSidebar_();
 }
 
 async function renderOnThisDay() {
   const container = document.getElementById('onthisday-container');
-  const subEl = document.getElementById('onthisday-sub');
+  const titleEl = document.getElementById('recall-head-label');
   if (!container) return;
-  const today = new Date();
-  if (sameDayMonth === null) { sameDayMonth = today.getMonth() + 1; sameDayDay = today.getDate(); }
-  initSameDayControls_();
+  initSameDayState_();
   showLoading(container, '探しています...');
 
   await ensureMyDiaries();
-
-  const isToday = sameDayMonth === today.getMonth() + 1 && sameDayDay === today.getDate();
-  if (subEl) subEl.textContent = `${isToday ? '今日、' : ''}${sameDayMonth}月${sameDayDay}日に書いた日記を、年ごとに並べて見比べられます。`;
+  renderRecallSidebar_();
 
   const byDate = groupDiariesByDate_(allMyDiaries);
-  const md = `${pad2_(sameDayMonth)}-${pad2_(sameDayDay)}`;
-  const thisYear = today.getFullYear();
-  const allYears = allMyDiaries.map(d => new Date(d.createdAt).getFullYear()).filter(y => !isNaN(y));
 
-  if (!allYears.length) {
-    container.innerHTML = '<p class="empty-msg">まだ日記がありません。最初の一筆を綴りましょう。</p>';
+  // ---- 月別タイムライン表示 ----
+  if (recallMode === 'month' && recallYM) {
+    if (titleEl) titleEl.textContent = `${recallYM.y}年${recallYM.m}月`;
+    const prefix = `${recallYM.y}-${pad2_(recallYM.m)}-`;
+    const keys = Object.keys(byDate).filter(k => k.startsWith(prefix)).sort().reverse();
+    const back = `<button type="button" class="rc-link-btn rc-back" onclick="backToSameDay()">📆 ${sameDayMonth}月${sameDayDay}日の表示に戻る</button>`;
+    container.innerHTML = back + (keys.length
+      ? keys.map(k => rcTimelineDayHtml_(k, byDate[k], { showJump: true })).join('')
+      : '<p class="empty-msg">この月の日記はありません。</p>');
     return;
   }
 
-  // 最初に日記を書いた年〜今年まで、記録のない年も「空白の年」として並べる
-  const firstYear = Math.min(...allYears);
-  let years = [];
-  for (let y = thisYear; y >= firstYear; y--) years.push(y);
-  if (sameDayOrder === 'asc') years.reverse();
+  // ---- 毎年の同じ日（10年日記形式） ----
+  if (titleEl) titleEl.textContent = `${sameDayMonth}月${sameDayDay}日`;
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const thisYear = today.getFullYear();
+  const allYears = allMyDiaries.map(d => new Date(d.createdAt).getFullYear()).filter(y => !isNaN(y));
+  const startYear = allYears.length ? Math.min(...allYears, thisYear) : thisYear;
+  const endYear = Math.max(startYear + 9, thisYear); // 最初の年から10年分（今年がそれより先ならそこまで）
+  const md = `${pad2_(sameDayMonth)}-${pad2_(sameDayDay)}`;
 
-  const hitYears = years.filter(y => byDate[`${y}-${md}`]);
-  const isLeapOnly = sameDayMonth === 2 && sameDayDay === 29;
-
-  const cols = years.map(y => {
-    const key = `${y}-${md}`;
-    const list = byDate[key] || [];
+  let html = '';
+  for (let y = startYear; y <= endYear; y++) {
     const dt = new Date(y, sameDayMonth - 1, sameDayDay);
     const validDate = dt.getMonth() === sameDayMonth - 1; // 平年の2/29は存在しない
+    const list = byDate[`${y}-${md}`] || [];
+    const isToday = validDate && dt.getTime() === today.getTime();
     const future = validDate && dt > today;
-    const yearsAgo = thisYear - y;
-    let bodyHtml;
-    if (list.length) bodyHtml = list.map(recallEntryHtml_).join('');
-    else if (!validDate) bodyHtml = '<div class="rc-empty">この年に2月29日はありません</div>';
-    else if (future) bodyHtml = '<div class="rc-empty">まだこれから。<br>この日が来たら書いてみましょう ✏️</div>';
-    else bodyHtml = '<div class="rc-empty">この年の記録はありません</div>';
-    return `
-      <section class="rc-col${list.length ? '' : ' is-empty'}${yearsAgo === 0 ? ' is-this-year' : ''}">
-        <header class="rc-col-head">
-          <span class="rc-year">${y}年</span>
-          ${validDate ? `<span class="rc-wday">（${WDAYS[dt.getDay()]}）</span>` : ''}
-          <span class="rc-ago">${yearsAgo === 0 ? '今年' : yearsAgo + '年前'}</span>
-        </header>
-        ${bodyHtml}
+
+    let boxHtml;
+    if (list.length) {
+      boxHtml = `<div class="rc-box has-diary">${list.map(rcDiaryContentHtml_).join('<hr class="rc-sep">')}</div>`;
+    } else if (!validDate) {
+      boxHtml = `<div class="rc-box is-empty">この年に2月29日はありません</div>`;
+    } else if (isToday) {
+      boxHtml = `<div class="rc-box is-empty is-today" onclick="switchTab('post')">タップして今日の日記を書く ✏️</div>`;
+    } else if (future) {
+      boxHtml = `<div class="rc-box is-empty is-future">まだ先の日です</div>`;
+    } else {
+      boxHtml = `<div class="rc-box is-empty">記録はありません</div>`;
+    }
+
+    html += `
+      <section class="rc-year-block${isToday ? ' is-today' : ''}">
+        <h3 class="rc-year-title">${y}年${y === thisYear ? '<span class="rc-this-year">今年</span>' : ''}</h3>
+        ${boxHtml}
+        <div class="rc-foot">
+          ${validDate ? `<span>${WDAYS_LONG[dt.getDay()]}</span>` : ''}
+          ${list.length ? `<span class="rc-foot-mood">${list.map(x => x.mood || '😊').join(' ')}</span>` : ''}
+        </div>
       </section>`;
-  }).join('');
-
-  const summary = hitYears.length
-    ? `<p class="rc-summary">📚 ${years.length}年のうち <strong>${hitYears.length}年分</strong> の記録があります${isLeapOnly ? '（うるう日）' : ''}</p>`
-    : `<p class="rc-summary">この月日の日記はまだありません。「⏩ 記録のある日」で書いた日へ移動できます。</p>`;
-
-  container.innerHTML = summary + `<div class="${columnsClass_()}">${cols}</div>`;
+  }
+  container.innerHTML = html;
 }
 
-// ===== ランダム（過去の日をランダムに選んで並べる） =====
+// サイドバー（カレンダー＋月別アーカイブ）
+function renderRecallSidebar_() {
+  const side = document.getElementById('recall-sidebar');
+  if (!side) return;
+  const byDate = groupDiariesByDate_(allMyDiaries);
+  const t = new Date();
+  const todayKey = localDateKey_(t.toISOString());
+
+  // --- カレンダー ---
+  const first = new Date(calYear, calMonth - 1, 1);
+  const start = new Date(first); start.setDate(1 - first.getDay()); // 日曜はじまり
+  let cells = '';
+  for (let i = 0; i < 42; i++) {
+    const dt = new Date(start); dt.setDate(start.getDate() + i);
+    if (i >= 35 && dt.getMonth() !== calMonth - 1) break; // 6週目が丸ごと翌月なら省略
+    const y = dt.getFullYear(), m = dt.getMonth() + 1, d = dt.getDate();
+    const key = `${y}-${pad2_(m)}-${pad2_(d)}`;
+    const cls = ['rc-cal-cell'];
+    if (m !== calMonth) cls.push('other');
+    if (dt.getDay() === 0) cls.push('sun');
+    if (dt.getDay() === 6) cls.push('sat');
+    if (byDate[key]) cls.push('has');
+    if (key === todayKey) cls.push('today');
+    if (recallMode === 'sameday' && m === sameDayMonth && d === sameDayDay) cls.push('selected');
+    cells += `<button type="button" class="${cls.join(' ')}" onclick="selectSameDay(${y}, ${m}, ${d})">${d}</button>`;
+  }
+
+  // --- 月別アーカイブ（件数つき・新しい月から） ---
+  const monthCount = {};
+  allMyDiaries.forEach(d => {
+    const k = localDateKey_(d.createdAt).slice(0, 7);
+    if (k) monthCount[k] = (monthCount[k] || 0) + 1;
+  });
+  const months = Object.keys(monthCount).sort().reverse();
+  const archive = months.map(k => {
+    const [y, m] = k.split('-').map(Number);
+    const active = recallMode === 'month' && recallYM && recallYM.y === y && recallYM.m === m;
+    return `<button type="button" class="rc-arc-row${active ? ' active' : ''}" onclick="openRecallMonth(${y}, ${m})">
+      <span>${y}年${m}月</span><span class="rc-arc-count">${monthCount[k]}</span></button>`;
+  }).join('');
+
+  side.innerHTML = `
+    <div class="rc-cal">
+      <div class="rc-cal-head">
+        <span class="rc-cal-title">${calYear}年${calMonth}月</span>
+        <div class="rc-cal-nav">
+          <button type="button" onclick="calShift(-12)" title="前の年">&lt;&lt;</button>
+          <button type="button" onclick="calShift(-1)" title="前の月">&lt;</button>
+          <button type="button" onclick="calToday()">今日</button>
+          <button type="button" onclick="calShift(1)" title="次の月">&gt;</button>
+          <button type="button" onclick="calShift(12)" title="次の年">&gt;&gt;</button>
+        </div>
+      </div>
+      <div class="rc-cal-grid">
+        ${WDAYS.map((w, i) => `<div class="rc-cal-wd${i === 0 ? ' sun' : i === 6 ? ' sat' : ''}">${w}</div>`).join('')}
+        ${cells}
+      </div>
+    </div>
+    <div class="rc-panel">
+      <button type="button" class="rc-panel-head" onclick="toggleArchive()">
+        <span>日記</span><span>${archiveOpen ? '▾' : '▸'}</span>
+      </button>
+      ${archiveOpen ? (archive || '<div class="rc-arc-empty">まだ日記がありません</div>') : ''}
+    </div>`;
+}
+
+// ===== ランダム（過去の日をランダムに選んでタイムライン形式で並べる） =====
 let randomCount = 3;
 let lastRandomKeys = [];
 
@@ -745,26 +840,8 @@ async function renderRandomDays() {
   const picked = shuffled.slice(0, randomCount).sort().reverse(); // 新しい日→古い日
   lastRandomKeys = picked;
 
-  const cols = picked.map(k => {
-    const [y, m, d] = k.split('-').map(Number);
-    const dt = new Date(y, m - 1, d);
-    return `
-      <section class="rc-col">
-        <header class="rc-col-head">
-          <span class="rc-year">${y}年${m}月${d}日</span>
-          <span class="rc-wday">（${WDAYS[dt.getDay()]}）</span>
-          <span class="rc-ago">${agoLabel_(k)}</span>
-        </header>
-        ${byDate[k].map(recallEntryHtml_).join('')}
-        <button type="button" class="rc-jump-btn" onclick="jumpToSameDay(${m}, ${d})">📆 毎年の${m}月${d}日を見る</button>
-      </section>`;
-  }).join('');
-
-  const note = keys.length < randomCount
-    ? `<p class="rc-summary">記録のある過去の日は ${keys.length}日分です。</p>`
-    : `<p class="rc-summary">🎲 記録のある ${keys.length}日の中から ${picked.length}日を選びました</p>`;
-
-  container.innerHTML = note + `<div class="${columnsClass_()}">${cols}</div>`;
+  const note = `<p class="rc-summary">🎲 記録のある ${keys.length}日の中から ${picked.length}日を選びました</p>`;
+  container.innerHTML = note + picked.map(k => rcTimelineDayHtml_(k, byDate[k], { showAgo: true, showJump: true })).join('');
 }
 
 // ===== 年表 =====

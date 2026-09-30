@@ -414,7 +414,7 @@ function postDiary(p, sess) {
     return jsonRes({error: err.message});
   }
   sh('diaries').appendRow([diaryId, sess.memberId, sess.nickname, title, content,
-    mood||'😊', tags||'', isPublic!==false, n, n, photosToJson_(photoList)]);
+    mood||'😊', tags||'', isPublic===true, n, n, photosToJson_(photoList)]); // 指定がなければ非公開
   return jsonRes({success: true, diaryId});
 }
 

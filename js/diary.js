@@ -453,7 +453,7 @@ function openEditModal(diaryId) {
   document.getElementById('edit-content').value = diary.content || '';
   document.getElementById('edit-mood').value    = diary.mood || '😊';
   document.getElementById('edit-tags').value    = diary.tags || '';
-  document.getElementById('edit-public').checked = diary.isPublic !== false;
+  document.getElementById('edit-public').checked = diary.isPublic === true; // 不明な場合は非公開扱い
   editPhotos = [];
   editExistingPhotos = parsePhotos(diary.photos);
   renderExistingPhotoPreview(diaryId);

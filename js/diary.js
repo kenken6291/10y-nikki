@@ -15,6 +15,7 @@ function resetDiaryCaches() {
   editExistingPhotos = [];
   myDiariesPromise = null;
   try { sessionStorage.removeItem(MY_DIARIES_CACHE_KEY); } catch (e) {}
+  try { thumbDbClear_(); } catch (e) {} // 別の人がログインしたときに前の人の写真が残らないように
 }
 
 // ===== 写真アップロード（Googleドライブ保存） =====
@@ -132,15 +133,23 @@ function renderPhotoGallery(diaryId, photos) {
 }
 
 // ===== 写真の遅延読み込み（全タブ共通） =====
-// 写真はGAS経由で1枚ずつ取得するため、一度に全部要求するとGASが混み合って
-// 日記一覧など他の通信まで遅くなる。画面に見えてきたものから、同時に3枚までに絞って読み込む。
-const PHOTO_PARALLEL = 3;
+// ・一覧（写真タブ・日記カード・同じ日など）では、元の大きな写真ではなく小さなサムネイルを使う
+// ・サムネイルは最大12枚を1回の通信でまとめて取得（GASの呼び出し回数を大幅に減らす）
+// ・一度取得したサムネイルはブラウザ（IndexedDB）に保存し、次回からは通信なしで即表示
+// ・画面に見えてきたものから順に読み込む
+// ・写真を押して拡大するときだけ、元の大きな写真を取得する
+const PHOTO_PARALLEL = 3;   // 元画像の同時取得数
+const THUMB_BATCH = 12;     // サムネイル1回の通信でまとめる枚数
+const THUMB_PARALLEL = 2;   // サムネイル通信の同時実行数
 let photoQueue = [];
 let photoLoading = 0;
 let photoObserver = null;
 let lazyPhotoScheduled = false;
+let thumbQueue = [];
+let thumbBatches = 0;
+let thumbTimer = null;
+const thumbMem = {}; // fileId → dataURI（このページを開いている間）
 
-// mode: 'replace'＝中身を画像に置き換え（クリックで拡大） / 'prepend'＝先頭に画像を差し込む（写真タブ）
 function lazyPhotoHtml_(cls, diaryId, fileId, mode, inner = '', attrs = '') {
   scheduleLazyPhotoScan_();
   return `<div class="${cls} loading lazy-photo" data-diary="${escHtml(diaryId)}" data-file="${escHtml(fileId)}" data-mode="${mode}" ${attrs}>${inner}</div>`;
@@ -169,14 +178,86 @@ function getPhotoObserver_() {
         photoObserver.unobserve(en.target);
         enqueuePhoto_(en.target);
       });
-    }, { rootMargin: '300px 0px' });
+    }, { rootMargin: '400px 0px' });
   }
   return photoObserver;
 }
 
+// 写真枠に画像を入れる
+function applyPhoto_(el, dataUri, isThumb) {
+  if (!el.isConnected) return;
+  el.classList.remove('loading', 'lazy-photo');
+  if (!dataUri) {
+    if (el.dataset.mode === 'replace') el.remove(); else el.classList.add('broken');
+    return;
+  }
+  const img = document.createElement('img');
+  img.src = dataUri; img.alt = ''; img.decoding = 'async';
+  if (el.dataset.mode === 'replace') {
+    const diaryId = el.dataset.diary, fileId = el.dataset.file;
+    img.onclick = ev => { ev.stopPropagation(); openPhotoFull_(diaryId, fileId, img.src, isThumb); };
+    el.innerHTML = '';
+    el.appendChild(img);
+  } else {
+    el.insertBefore(img, el.firstChild);
+  }
+}
+
+// 拡大表示：まずサムネイルで開き、元の写真が届いたら差し替える
+async function openPhotoFull_(diaryId, fileId, currentSrc, isThumb) {
+  openPhotoLightbox(currentSrc);
+  if (!isThumb) return;
+  const full = await fetchPhoto(diaryId, fileId);
+  const lb = document.getElementById('lightbox-img');
+  const overlay = document.getElementById('photo-lightbox');
+  if (full && lb && overlay && overlay.style.display !== 'none' && lb.src === currentSrc) lb.src = full;
+}
+
 function enqueuePhoto_(el) {
-  photoQueue.push(el);
-  pumpPhotoQueue_();
+  if (el.dataset.full) { photoQueue.push(el); pumpPhotoQueue_(); return; }
+  enqueueThumb_(el);
+}
+
+async function enqueueThumb_(el) {
+  const fileId = el.dataset.file;
+  if (thumbMem[fileId]) { applyPhoto_(el, thumbMem[fileId], true); return; }
+  const saved = await thumbDbGet_(fileId);
+  if (saved) { thumbMem[fileId] = saved; applyPhoto_(el, saved, true); return; }
+  thumbQueue.push(el);
+  if (!thumbTimer) thumbTimer = setTimeout(() => { thumbTimer = null; pumpThumbs_(); }, 30); // 少し待ってまとめて送る
+}
+
+function pumpThumbs_() {
+  while (thumbBatches < THUMB_PARALLEL && thumbQueue.length) {
+    const els = [];
+    const seen = {};
+    while (thumbQueue.length && Object.keys(seen).length < THUMB_BATCH) {
+      const el = thumbQueue.shift();
+      if (!el.isConnected) continue;
+      if (thumbMem[el.dataset.file]) { applyPhoto_(el, thumbMem[el.dataset.file], true); continue; }
+      seen[el.dataset.file] = { diaryId: el.dataset.diary, fileId: el.dataset.file };
+      els.push(el);
+    }
+    if (!els.length) continue;
+    thumbBatches++;
+    Auth.post({ action: 'getThumbs', token: Auth.getToken() || '', items: Object.values(seen) })
+      .then(res => {
+        const thumbs = (res && res.success && res.thumbs) || {};
+        els.forEach(el => {
+          const t = thumbs[el.dataset.file];
+          if (t) {
+            const uri = `data:${t.mimeType};base64,${t.data}`;
+            thumbMem[el.dataset.file] = uri;
+            thumbDbPut_(el.dataset.file, uri);
+            applyPhoto_(el, uri, true);
+          } else {
+            el.dataset.full = '1'; photoQueue.push(el); // サムネイルが無ければ元の写真で表示
+          }
+        });
+      })
+      .catch(() => { els.forEach(el => { el.dataset.full = '1'; photoQueue.push(el); }); })
+      .finally(() => { thumbBatches--; pumpPhotoQueue_(); pumpThumbs_(); });
+  }
 }
 
 function pumpPhotoQueue_() {
@@ -184,24 +265,49 @@ function pumpPhotoQueue_() {
     const el = photoQueue.shift();
     if (!el.isConnected) continue; // 描き直しで消えたもの
     photoLoading++;
-    fetchPhoto(el.dataset.diary, el.dataset.file).then(dataUri => {
-      if (!el.isConnected) return;
-      el.classList.remove('loading', 'lazy-photo');
-      if (!dataUri) {
-        if (el.dataset.mode === 'replace') el.remove(); else el.classList.add('broken');
-        return;
-      }
-      const img = document.createElement('img');
-      img.src = dataUri; img.alt = '';
-      if (el.dataset.mode === 'replace') {
-        img.onclick = ev => { ev.stopPropagation(); openPhotoLightbox(img.src); };
-        el.innerHTML = '';
-        el.appendChild(img);
-      } else {
-        el.insertBefore(img, el.firstChild);
-      }
-    }).finally(() => { photoLoading--; pumpPhotoQueue_(); });
+    fetchPhoto(el.dataset.diary, el.dataset.file)
+      .then(dataUri => applyPhoto_(el, dataUri, false))
+      .finally(() => { photoLoading--; pumpPhotoQueue_(); });
   }
+}
+
+// ----- サムネイルのブラウザ保存（IndexedDB） -----
+// ログインし直したときに消去する（resetDiaryCaches から呼ぶ）
+const THUMB_DB = '10y-nikki-thumbs';
+let thumbDbPromise = null;
+function thumbDb_() {
+  if (thumbDbPromise) return thumbDbPromise;
+  thumbDbPromise = new Promise(resolve => {
+    try {
+      if (!window.indexedDB) return resolve(null);
+      const req = indexedDB.open(THUMB_DB, 1);
+      req.onupgradeneeded = () => req.result.createObjectStore('thumbs');
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => resolve(null);
+    } catch (e) { resolve(null); }
+  });
+  return thumbDbPromise;
+}
+async function thumbDbGet_(fileId) {
+  const db = await thumbDb_();
+  if (!db) return null;
+  return new Promise(resolve => {
+    try {
+      const req = db.transaction('thumbs', 'readonly').objectStore('thumbs').get(fileId);
+      req.onsuccess = () => resolve(req.result || null);
+      req.onerror = () => resolve(null);
+    } catch (e) { resolve(null); }
+  });
+}
+async function thumbDbPut_(fileId, uri) {
+  const db = await thumbDb_();
+  if (!db) return;
+  try { db.transaction('thumbs', 'readwrite').objectStore('thumbs').put(uri, fileId); } catch (e) {}
+}
+async function thumbDbClear_() {
+  const db = await thumbDb_();
+  if (!db) return;
+  try { db.transaction('thumbs', 'readwrite').objectStore('thumbs').clear(); } catch (e) {}
 }
 
 // 権限チェック付きで1枚取得（本人・管理者・公開日記のみ許可されサーバー側で判定）

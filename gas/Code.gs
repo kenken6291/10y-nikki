@@ -39,6 +39,7 @@ function doPost(e) {
     // 写真取得は「公開日記なら誰でも／非公開なら本人か管理者のみ」を
     // handleGetPhoto_ 内部で判定するため、ここではセッション必須にしない
     if (action === 'getPhoto')             return handleGetPhoto_(p);
+    if (action === 'getThumbs')            return handleGetThumbs_(p); // 一覧用の小さい写真をまとめて返す
 
     // セッション検証
     const sess = validateSession(p.token);
@@ -126,16 +127,49 @@ function generateTempPassword() {
   return pw;
 }
 
+// セッション確認（高速化版）
+// ・確認できたセッションは CacheService に最大5分覚えておき、毎回シートを読まない
+// ・シートを読むときも新しい行（下）から探す
 function validateSession(token) {
   if (!token) return null;
-  const rows = allRows('sessions');
   const nowD = new Date();
-  for (const r of rows) {
+  const cache = CacheService.getScriptCache();
+  const key = 'sess_' + token;
+  try {
+    const c = cache.get(key);
+    if (c) {
+      const o = JSON.parse(c);
+      if (new Date(o.exp) > nowD) return o.sess;
+    }
+  } catch (e) { /* キャッシュが壊れていたらシートで確認 */ }
+
+  const rows = allRows('sessions');
+  for (let i = rows.length - 1; i >= 0; i--) {
+    const r = rows[i];
     if (r[0] === token && new Date(r[2]) > nowD) {
-      return { memberId: r[1], role: r[3], nickname: r[4] };
+      const sess = { memberId: r[1], role: r[3], nickname: r[4] };
+      const secs = Math.min(300, Math.floor((new Date(r[2]) - nowD) / 1000));
+      if (secs > 0) {
+        try { cache.put(key, JSON.stringify({ sess: sess, exp: new Date(r[2]).toISOString() }), secs); } catch (e) {}
+      }
+      return sess;
     }
   }
   return null;
+}
+
+// 期限切れのセッション行をまとめて削除（sessionsシートが膨らむと毎回の確認が遅くなるため）
+function purgeExpiredSessions_() {
+  const sheet = sh('sessions');
+  const last = sheet.getLastRow();
+  if (last < 2) return;
+  const cols = sheet.getLastColumn();
+  const rows = sheet.getRange(2, 1, last - 1, cols).getValues();
+  const nowD = new Date();
+  const alive = rows.filter(function(r) { return r[0] && new Date(r[2]) > nowD; });
+  if (alive.length === rows.length) return;
+  sheet.getRange(2, 1, last - 1, cols).clearContent();
+  if (alive.length) sheet.getRange(2, 1, alive.length, cols).setValues(alive);
 }
 
 // memberId（＝メールアドレス）から通知用情報を取得
@@ -204,7 +238,15 @@ function login(p) {
 
   const token = uuid();
   const expire = new Date(Date.now() + SESSION_EXPIRE_HOURS * 3600000);
-  sh('sessions').appendRow([token, m[0], expire.toISOString(), m[6], m[3]]);
+  // 同時ログインで行が消えないよう、掃除と追加はロックの中で行う
+  const lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    try { purgeExpiredSessions_(); } catch (e) { /* 掃除に失敗してもログインは続ける */ }
+    sh('sessions').appendRow([token, m[0], expire.toISOString(), m[6], m[3]]);
+  } finally {
+    lock.releaseLock();
+  }
   return jsonRes({
     success: true, token, nickname: m[3], memberId: m[0], role: m[6],
     birthYear: m[4], mustChangePassword: m[14] === true
@@ -273,6 +315,7 @@ function adminLogin(p) {
 }
 
 function logout(token) {
+  try { CacheService.getScriptCache().remove('sess_' + token); } catch (e) {}
   const sheet = sh('sessions');
   const data = sheet.getDataRange().getValues();
   for (let i = 1; i < data.length; i++) {
@@ -385,18 +428,32 @@ function getDiaryDetail(e) {
     likes, comments});
 }
 
+// 指定シートの1列だけを読み、値ごとの件数を数える（いいね・コメント数の集計用）
+function countByColumn_(sheetName, col) {
+  const sheet = sh(sheetName);
+  const counts = {};
+  if (!sheet || sheet.getLastRow() < 2) return counts;
+  sheet.getRange(2, col, sheet.getLastRow() - 1, 1).getValues().forEach(function(r) {
+    const k = r[0];
+    if (k) counts[k] = (counts[k] || 0) + 1;
+  });
+  return counts;
+}
+
+// マイ日記（高速化版）
+// いいね・コメントは日記ごとに全件を探すのをやめ、日記ID列だけを1回読んで件数表を作る
 function getMyDiaries(p, sess) {
   const rows = allRows('diaries');
-  const likes = allRows('diary_likes');
-  const comments = allRows('diary_comments');
+  const likeCounts    = countByColumn_('diary_likes', 2);
+  const commentCounts = countByColumn_('diary_comments', 2);
   const mine = rows
     .filter(r => r[1] === sess.memberId)
     .map(r => ({
       diaryId: r[0], title: r[3], content: r[4], mood: r[5],
       tags: r[6], isPublic: r[7], createdAt: r[8], updatedAt: r[9],
       photos: photosFromJson_(r[10]),
-      likeCount:    likes.filter(l => l[1] === r[0]).length,
-      commentCount: comments.filter(c => c[1] === r[0]).length
+      likeCount:    likeCounts[r[0]] || 0,
+      commentCount: commentCounts[r[0]] || 0
     }));
   mine.sort((a,b) => new Date(b.createdAt) - new Date(a.createdAt));
   return jsonRes({success: true, diaries: mine});
@@ -1149,8 +1206,12 @@ function handleGetPhoto_(p) {
   const fileId  = p.fileId;
   if (!diaryId || !fileId) return jsonRes({success: false, error: 'パラメータ不足'});
 
-  const diaryRow = allRows('diaries').find(r => r[0] === diaryId);
-  if (!diaryRow) return jsonRes({success: false, error: '日記が見つかりません'});
+  // 写真は1枚ずつ何度も呼ばれるので、日記シート全体ではなくA列を検索して該当行だけ読む
+  const dsheet = sh('diaries');
+  const found = dsheet.getRange(1, 1, dsheet.getLastRow(), 1)
+    .createTextFinder(String(diaryId)).matchEntireCell(true).findNext();
+  if (!found || found.getRow() < 2) return jsonRes({success: false, error: '日記が見つかりません'});
+  const diaryRow = dsheet.getRange(found.getRow(), 1, 1, 8).getValues()[0];
 
   const requester = p.token ? validateSession(p.token) : null;
   const isOwner   = requester && requester.memberId === diaryRow[1];
@@ -1172,10 +1233,11 @@ function handleGetPhoto_(p) {
       if (parents.next().getName() === diaryId) { belongsToDiary = true; break; }
     }
     if (!belongsToDiary) return jsonRes({success: false, error: 'アクセス権がありません'});
+    const blob = file.getBlob(); // 1回だけ取得
     return jsonRes({
       success: true,
-      mimeType: file.getBlob().getContentType(),
-      data: Utilities.base64Encode(file.getBlob().getBytes())
+      mimeType: blob.getContentType(),
+      data: Utilities.base64Encode(blob.getBytes())
     });
   } catch (err) {
     return jsonRes({success: false, error: '画像の取得に失敗しました'});
@@ -1299,4 +1361,102 @@ function handleParseDiaryImage_(p, sess) {
   } catch (err) {
     return jsonRes({success: false, error: '写真の読み取りに失敗しました: ' + err.message});
   }
+}
+
+/**
+ * ===== 一覧用サムネイル（写真タブ・日記カード等の高速表示用） =====
+ * 'getThumbs' : 複数の写真の小さい画像（幅 THUMB_WIDTH px程度）を1回の通信でまとめて返す。
+ *   - 権限は getPhoto と同じ（公開日記は誰でも／非公開は本人か管理者のみ）
+ *   - fileId がその日記の photos 列に登録されているかで照合（Driveのフォルダを1枚ずつ調べない）
+ *   - 作ったサムネイルは CacheService に6時間保存し、2回目以降はすぐ返す
+ *   - Driveのサムネイル機能で縮小（UrlFetchApp.fetchAll で並列取得）。
+ *     取れない場合は getThumbnail()、それも無ければ元画像を返す
+ * 入力 : { items:[{diaryId, fileId}, ...], token }
+ * 出力 : { success:true, thumbs:{ fileId: {mimeType, data} } }  ※権限が無い・失敗したものは含まれない
+ */
+const THUMB_WIDTH = 360;
+const THUMB_MAX_ITEMS = 24;
+const THUMB_CACHE_SECONDS = 21600;
+
+function handleGetThumbs_(p) {
+  const items = (Array.isArray(p.items) ? p.items : []).slice(0, THUMB_MAX_ITEMS)
+    .filter(function(it) { return it && it.diaryId && it.fileId; });
+  if (!items.length) return jsonRes({success: true, thumbs: {}});
+
+  // --- 権限チェック（日記シートは必要な列だけ1回読む） ---
+  const requester = p.token ? validateSession(p.token) : null;
+  const isAdmin = requester && requester.role === 'admin';
+  const dsheet = sh('diaries');
+  const n = dsheet.getLastRow() - 1;
+  const need = {};
+  items.forEach(function(it) { need[it.diaryId] = true; });
+  const info = {};
+  if (n > 0) {
+    const ids    = dsheet.getRange(2, 1, n, 2).getValues();   // diaryId, memberId
+    const pubs   = dsheet.getRange(2, 8, n, 1).getValues();   // isPublic
+    const photos = dsheet.getRange(2, 11, n, 1).getValues();  // photos(JSON)
+    for (let i = 0; i < n; i++) {
+      const id = ids[i][0];
+      if (!need[id]) continue;
+      const allowed = pubs[i][0] === true || isAdmin || (requester && requester.memberId === ids[i][1]);
+      if (!allowed) continue;
+      const fileIds = {};
+      photosFromJson_(photos[i][0]).forEach(function(ph) { if (ph && ph.fileId) fileIds[ph.fileId] = true; });
+      info[id] = fileIds;
+    }
+  }
+  const okIds = [];
+  items.forEach(function(it) {
+    if (info[it.diaryId] && info[it.diaryId][it.fileId] && okIds.indexOf(it.fileId) === -1) okIds.push(it.fileId);
+  });
+  if (!okIds.length) return jsonRes({success: true, thumbs: {}});
+
+  // --- キャッシュにあるものはそのまま返す ---
+  const cache = CacheService.getScriptCache();
+  const thumbs = {};
+  let cached = {};
+  try { cached = cache.getAll(okIds.map(function(id) { return 'th_' + id; })); } catch (e) {}
+  const missing = okIds.filter(function(id) {
+    const c = cached['th_' + id];
+    if (!c) return true;
+    try { thumbs[id] = JSON.parse(c); return false; } catch (e) { return true; }
+  });
+
+  // --- 無いものはDriveのサムネイルをまとめて並列取得 ---
+  if (missing.length) {
+    const oauth = ScriptApp.getOAuthToken();
+    let responses = [];
+    try {
+      responses = UrlFetchApp.fetchAll(missing.map(function(id) {
+        return {
+          url: 'https://drive.google.com/thumbnail?id=' + encodeURIComponent(id) + '&sz=w' + THUMB_WIDTH,
+          headers: { Authorization: 'Bearer ' + oauth },
+          muteHttpExceptions: true, followRedirects: true
+        };
+      }));
+    } catch (e) { responses = []; }
+
+    const toCache = {};
+    missing.forEach(function(id, i) {
+      let blob = null;
+      const r = responses[i];
+      if (r && r.getResponseCode() === 200 && /^image\//.test(String(r.getHeaders()['Content-Type'] || r.getHeaders()['content-type'] || ''))) {
+        blob = r.getBlob();
+      }
+      if (!blob) {
+        try {
+          const file = DriveApp.getFileById(id);
+          blob = file.getThumbnail() || file.getBlob();
+        } catch (e) { blob = null; }
+      }
+      if (!blob) return;
+      const t = { mimeType: blob.getContentType() || 'image/jpeg', data: Utilities.base64Encode(blob.getBytes()) };
+      thumbs[id] = t;
+      const json = JSON.stringify(t);
+      if (json.length < 95000) toCache['th_' + id] = json; // CacheServiceは1件100KBまで
+    });
+    try { if (Object.keys(toCache).length) cache.putAll(toCache, THUMB_CACHE_SECONDS); } catch (e) {}
+  }
+
+  return jsonRes({success: true, thumbs: thumbs});
 }

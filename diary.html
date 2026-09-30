@@ -223,6 +223,10 @@
     .my-refreshing .loading-spinner { width:12px; height:12px; }
     .my-more-wrap { grid-column:1 / -1; text-align:center; padding:1rem 0 1.5rem; }
     .my-more-btn { padding:0.6rem 1.6rem; }
+    /* ===== マイ日記：絞り込みバー ===== */
+    .my-filter-bar { align-items:center; flex-wrap:wrap; gap:0.6rem; background:#fff3dc; border:1px solid var(--light-amber); border-radius:8px; padding:0.5rem 0.8rem; margin-bottom:1rem; font-size:0.9rem; color: var(--sepia); }
+    .my-filter-bar .rc-btn { margin-left:auto; font-size:0.8rem; padding:0.25rem 0.6rem; }
+    .my-filter-bar .rc-link-btn { margin-left:0; }
   </style>
 </head>
 <body>
@@ -325,11 +329,17 @@
 
     <!-- ===== マイ日記 ===== -->
     <div id="tab-mine" class="tab-content" style="display:none">
-      <h2 class="section-title">📚 マイ日記
-        <span id="my-diaries-refreshing" class="my-refreshing" style="display:none"><span class="loading-spinner"></span>最新に更新中…</span>
-      </h2>
-      <div id="my-diaries" class="diary-feed">
-        <div class="loading-msg"><span class="loading-spinner"></span>読み込み中...</div>
+      <div class="rc-layout">
+        <div class="rc-main">
+          <h2 class="section-title">📚 マイ日記
+            <span id="my-diaries-refreshing" class="my-refreshing" style="display:none"><span class="loading-spinner"></span>最新に更新中…</span>
+          </h2>
+          <div id="my-filter-bar" class="my-filter-bar" style="display:none"></div>
+          <div id="my-diaries" class="diary-feed">
+            <div class="loading-msg"><span class="loading-spinner"></span>読み込み中...</div>
+          </div>
+        </div>
+        <aside id="mine-sidebar" class="rc-side"></aside>
       </div>
     </div>
 
@@ -566,8 +576,8 @@ function switchTab(tab) {
   document.querySelectorAll('.tab-content').forEach(el => el.style.display = 'none');
   document.getElementById('tab-' + tab).style.display = 'block';
   activeTab = tab;
-  // 「同じ日」「写真」はカレンダー用サイドバーがあるので横幅を広げる
-  document.querySelector('.page-wrapper').classList.toggle('wide', tab === 'onthisday' || tab === 'photos');
+  // 「マイ日記」「同じ日」「写真」はカレンダー用サイドバーがあるので横幅を広げる
+  document.querySelector('.page-wrapper').classList.toggle('wide', tab === 'mine' || tab === 'onthisday' || tab === 'photos');
   if (tab === 'mine') loadMyDiaries();
   if (tab === 'timeline') renderTimeline();
   if (tab === 'onthisday') renderOnThisDay();

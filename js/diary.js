@@ -499,9 +499,12 @@ async function loadMyDiaries() {
   // 手元にある一覧（前回分）を先に表示
   const cached = allMyDiaries.length ? allMyDiaries : loadMyDiariesCache_();
   let shownJson = '';
+  initSameDayState_();
   if (cached) {
     allMyDiaries = cached;
-    renderMyDiaries(cached, container);
+    renderMyFilterBar_();
+    renderMyDiaries(myFilteredDiaries_(), container);
+    renderRecallSidebar_('mine');
     shownJson = JSON.stringify(cached);
     setMyDiariesRefreshing_(true);
   } else {
@@ -512,7 +515,11 @@ async function loadMyDiaries() {
     const res = await fetchMyDiaries_();
     if (res.success) {
       // 内容が変わっていなければ描き直さない（写真の再読み込みやちらつきを防ぐ）
-      if (JSON.stringify(res.diaries) !== shownJson) renderMyDiaries(res.diaries, container);
+      if (JSON.stringify(res.diaries) !== shownJson) {
+        renderMyFilterBar_();
+        renderMyDiaries(myFilteredDiaries_(), container);
+        renderRecallSidebar_('mine');
+      }
     } else if (!cached) container.innerHTML = '<p class="empty-msg">読み込みに失敗しました。</p>';
     else showToast(res.error || '最新の日記を取得できませんでした', 'error');
   } catch(e) {
@@ -529,13 +536,63 @@ function setMyDiariesRefreshing_(on) {
 
 function showMoreMyDiaries() {
   myDiariesShown += MY_DIARIES_PAGE;
-  renderMyDiaries(allMyDiaries, document.getElementById('my-diaries'), true);
+  renderMyDiaries(myFilteredDiaries_(), document.getElementById('my-diaries'), true);
+}
+
+// ===== マイ日記の絞り込み（右のカレンダー・月別件数から） =====
+let myFilter = null; // null=すべて / {type:'month', key:'YYYY-MM'} / {type:'day', key:'YYYY-MM-DD'}
+
+function myFilteredDiaries_() {
+  if (!myFilter) return allMyDiaries;
+  return allMyDiaries.filter(d => {
+    const k = localDateKey_(d.createdAt);
+    return myFilter.type === 'day' ? k === myFilter.key : k.slice(0, 7) === myFilter.key;
+  });
+}
+
+function filterMyDiaries(type, key) {
+  // 同じものをもう一度押したら解除
+  myFilter = (myFilter && myFilter.type === type && myFilter.key === key) ? null : { type, key };
+  if (myFilter) {
+    const [y, m] = key.split('-').map(Number);
+    calYear = y; calMonth = m; // カレンダーもその月へ
+  }
+  refreshMyDiariesView_();
+  document.getElementById('tab-mine')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function clearMyFilter() {
+  myFilter = null;
+  refreshMyDiariesView_();
+}
+
+function refreshMyDiariesView_() {
+  myDiariesShown = MY_DIARIES_PAGE;
+  renderMyFilterBar_();
+  renderMyDiaries(myFilteredDiaries_(), document.getElementById('my-diaries'));
+  renderRecallSidebar_('mine');
+}
+
+function renderMyFilterBar_() {
+  const bar = document.getElementById('my-filter-bar');
+  if (!bar) return;
+  if (!myFilter) { bar.innerHTML = ''; bar.style.display = 'none'; return; }
+  const [y, m, d] = myFilter.key.split('-').map(Number);
+  const label = myFilter.type === 'day' ? `${y}年${m}月${d}日` : `${y}年${m}月`;
+  const n = myFilteredDiaries_().length;
+  bar.style.display = 'flex';
+  bar.innerHTML = `
+    <span>📌 <strong>${label}</strong> の日記（${n}件）</span>
+    ${myFilter.type === 'day' ? `<button type="button" class="rc-link-btn" onclick="jumpToSameDay(${m}, ${d})">📆 毎年の${m}月${d}日を見る</button>` : ''}
+    <button type="button" class="rc-btn" onclick="clearMyFilter()">✕ すべて表示</button>`;
 }
 
 function renderMyDiaries(diaries, container, append = false) {
   if (!container) return;
   if (!diaries.length) {
-    container.innerHTML = '<p class="empty-msg">まだ日記がありません。最初の一筆を綴りましょう。</p>';
+    container.innerHTML = myFilter
+      ? '<p class="empty-msg">この日の日記はありません。</p>'
+      : '<p class="empty-msg">まだ日記がありません。最初の一筆を綴りましょう。</p>';
     return;
   }
   const start = append ? container.querySelectorAll('.my-diary-card').length : 0;
@@ -815,7 +872,7 @@ function calShift(months) {
 }
 function calToday() {
   const t = new Date();
-  if (activeTab === 'photos') { calYear = t.getFullYear(); calMonth = t.getMonth() + 1; renderAllSidebars_(); return; }
+  if (activeTab === 'photos' || activeTab === 'mine') { calYear = t.getFullYear(); calMonth = t.getMonth() + 1; renderAllSidebars_(); return; }
   selectSameDay(t.getFullYear(), t.getMonth() + 1, t.getDate());
 }
 
@@ -827,6 +884,7 @@ function toggleArchive() {
 function renderAllSidebars_() {
   renderRecallSidebar_();
   renderRecallSidebar_('photos');
+  renderRecallSidebar_('mine');
 }
 
 async function renderOnThisDay() {
@@ -900,10 +958,11 @@ async function renderOnThisDay() {
 // mode='diary'  … 同じ日タブ用（日記のある日を太字、日付クリックでその日の毎年を表示、月クリックで月別タイムライン）
 // mode='photos' … 写真タブ用（写真のある日を太字、日付クリックで同じ日タブへ、月クリックでその月の写真へ移動）
 function renderRecallSidebar_(mode = 'diary') {
-  const side = document.getElementById(mode === 'photos' ? 'photos-sidebar' : 'recall-sidebar');
+  const side = document.getElementById(mode === 'photos' ? 'photos-sidebar' : mode === 'mine' ? 'mine-sidebar' : 'recall-sidebar');
   if (!side) return;
   initSameDayState_();
   const isPhotos = mode === 'photos';
+  const isMine = mode === 'mine'; // マイ日記タブ：日付・月を押すとその日／月の日記に絞り込む
   const source = isPhotos ? allMyDiaries.filter(d => parsePhotos(d.photos).length) : allMyDiaries;
   const byDate = groupDiariesByDate_(source);
   const t = new Date();
@@ -924,10 +983,13 @@ function renderRecallSidebar_(mode = 'diary') {
     if (dt.getDay() === 6) cls.push('sat');
     if (byDate[key]) cls.push('has');
     if (key === todayKey) cls.push('today');
-    if (!isPhotos && recallMode === 'sameday' && m === sameDayMonth && d === sameDayDay) cls.push('selected');
-    const onclick = isPhotos
-      ? (byDate[key] ? `photoScrollToDate('${key}')` : `jumpToSameDay(${m}, ${d})`)
-      : `selectSameDay(${y}, ${m}, ${d})`;
+    if (isMine) { if (myFilter && myFilter.type === 'day' && myFilter.key === key) cls.push('selected'); }
+    else if (!isPhotos && recallMode === 'sameday' && m === sameDayMonth && d === sameDayDay) cls.push('selected');
+    const onclick = isMine
+      ? `filterMyDiaries('day', '${key}')`
+      : isPhotos
+        ? (byDate[key] ? `photoScrollToDate('${key}')` : `jumpToSameDay(${m}, ${d})`)
+        : `selectSameDay(${y}, ${m}, ${d})`;
     cells += `<button type="button" class="${cls.join(' ')}" onclick="${onclick}">${d}</button>`;
   }
 
@@ -940,8 +1002,11 @@ function renderRecallSidebar_(mode = 'diary') {
   const months = Object.keys(monthCount).sort().reverse();
   const archive = months.map(k => {
     const [y, m] = k.split('-').map(Number);
-    const active = !isPhotos && recallMode === 'month' && recallYM && recallYM.y === y && recallYM.m === m;
-    const onclick = isPhotos ? `photoScrollToMonth(${y}, ${m})` : `openRecallMonth(${y}, ${m})`;
+    const active = isMine
+      ? (myFilter && myFilter.type === 'month' && myFilter.key === k)
+      : (!isPhotos && recallMode === 'month' && recallYM && recallYM.y === y && recallYM.m === m);
+    const onclick = isMine ? `filterMyDiaries('month', '${k}')`
+      : isPhotos ? `photoScrollToMonth(${y}, ${m})` : `openRecallMonth(${y}, ${m})`;
     return `<button type="button" class="rc-arc-row${active ? ' active' : ''}" onclick="${onclick}">
       <span>${y}年${m}月</span><span class="rc-arc-count">${monthCount[k]}</span></button>`;
   }).join('');

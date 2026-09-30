@@ -218,6 +218,11 @@
     @media (max-width: 600px) {
       .ph-grid { grid-template-columns:repeat(3, 1fr); }
     }
+    /* ===== マイ日記：更新中表示・もっと見る ===== */
+    .my-refreshing { display:inline-flex; align-items:center; gap:0.35rem; margin-left:0.8rem; font-size:0.75rem; font-weight:normal; color:#8a7862; vertical-align:middle; }
+    .my-refreshing .loading-spinner { width:12px; height:12px; }
+    .my-more-wrap { grid-column:1 / -1; text-align:center; padding:1rem 0 1.5rem; }
+    .my-more-btn { padding:0.6rem 1.6rem; }
   </style>
 </head>
 <body>
@@ -282,6 +287,8 @@
           <div class="form-group">
             <label>本文 <span style="color:#b00">*</span></label>
             <textarea id="diary-content" rows="10" placeholder="今日はどんな一日でしたか？" required></textarea>
+            <p class="ve-hint">🎬 YouTube・Instagram・TikTok・X・Facebook などの動画のURLを本文に貼ると、日記の中で再生できます。</p>
+            <div id="post-video-preview"></div>
           </div>
           <div class="form-group">
             <label>今日の気分</label>
@@ -318,7 +325,9 @@
 
     <!-- ===== マイ日記 ===== -->
     <div id="tab-mine" class="tab-content" style="display:none">
-      <h2 class="section-title">📚 マイ日記</h2>
+      <h2 class="section-title">📚 マイ日記
+        <span id="my-diaries-refreshing" class="my-refreshing" style="display:none"><span class="loading-spinner"></span>最新に更新中…</span>
+      </h2>
       <div id="my-diaries" class="diary-feed">
         <div class="loading-msg"><span class="loading-spinner"></span>読み込み中...</div>
       </div>
@@ -444,6 +453,7 @@
     <div class="form-group">
       <label>本文</label>
       <textarea id="edit-content" rows="8"></textarea>
+      <div id="edit-video-preview"></div>
     </div>
     <div class="form-group">
       <label>気分</label>
@@ -543,6 +553,7 @@
 
 <script src="js/config.js"></script>
 <script src="js/auth.js"></script>
+<script src="js/video-embed.js"></script>
 <script src="js/diary.js"></script>
 <script src="js/import.js"></script>
 <script>
@@ -571,6 +582,8 @@ document.addEventListener('DOMContentLoaded', () => {
   if (Auth.isLoggedIn()) {
     document.getElementById('login-prompt-section').style.display = 'none';
     document.getElementById('diary-logged-in').style.display = 'block';
+    prefetchMyDiaries(); // マイ日記を先読みしておく
+    veBindFormPreview('diary-content', 'post-video-preview'); // 本文の動画リンクをプレビュー
   } else {
     document.getElementById('login-prompt-section').style.display = 'block';
     document.getElementById('diary-logged-in').style.display = 'none';

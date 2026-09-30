@@ -13,6 +13,8 @@ function resetDiaryCaches() {
   postPhotos = [];
   editPhotos = [];
   editExistingPhotos = [];
+  myDiariesPromise = null;
+  try { sessionStorage.removeItem(MY_DIARIES_CACHE_KEY); } catch (e) {}
 }
 
 // ===== 写真アップロード（Googleドライブ保存） =====
@@ -123,37 +125,103 @@ function removeExistingPhoto(index) {
 function renderPhotoGallery(diaryId, photos) {
   const list = parsePhotos(photos);
   if (!list.length) return '';
-  const html = `<div class="photo-gallery">${list.map((p, i) =>
-    `<div class="gallery-thumb loading" id="gphoto-${diaryId}-${i}"></div>`
+  // 画面に見えてきたものから順に読み込む（下の lazyPhotoHtml_ 参照）
+  return `<div class="photo-gallery">${list.map(p =>
+    lazyPhotoHtml_('gallery-thumb', diaryId, p.fileId, 'replace')
   ).join('')}</div>`;
-  // レンダリング後に非同期で画像を取得（DOM挿入後に実行するため0msタイマー）
-  setTimeout(() => loadGalleryPhotos(diaryId, list), 0);
-  return html;
 }
 
-async function loadGalleryPhotos(diaryId, list) {
-  for (let i = 0; i < list.length; i++) {
-    const el = document.getElementById(`gphoto-${diaryId}-${i}`);
-    if (!el) continue;
-    const dataUri = await fetchPhoto(diaryId, list[i].fileId);
-    if (!dataUri) { el.remove(); continue; }
-    el.classList.remove('loading');
-    el.innerHTML = `<img src="${dataUri}" onclick="event.stopPropagation();openPhotoLightbox('${dataUri.replace(/'/g,"\\'")}')">`;
+// ===== 写真の遅延読み込み（全タブ共通） =====
+// 写真はGAS経由で1枚ずつ取得するため、一度に全部要求するとGASが混み合って
+// 日記一覧など他の通信まで遅くなる。画面に見えてきたものから、同時に3枚までに絞って読み込む。
+const PHOTO_PARALLEL = 3;
+let photoQueue = [];
+let photoLoading = 0;
+let photoObserver = null;
+let lazyPhotoScheduled = false;
+
+// mode: 'replace'＝中身を画像に置き換え（クリックで拡大） / 'prepend'＝先頭に画像を差し込む（写真タブ）
+function lazyPhotoHtml_(cls, diaryId, fileId, mode, inner = '', attrs = '') {
+  scheduleLazyPhotoScan_();
+  return `<div class="${cls} loading lazy-photo" data-diary="${escHtml(diaryId)}" data-file="${escHtml(fileId)}" data-mode="${mode}" ${attrs}>${inner}</div>`;
+}
+
+// HTMLが画面に挿入された直後に、未登録の写真枠を監視対象に加える
+function scheduleLazyPhotoScan_() {
+  if (lazyPhotoScheduled) return;
+  lazyPhotoScheduled = true;
+  setTimeout(() => {
+    lazyPhotoScheduled = false;
+    document.querySelectorAll('.lazy-photo:not([data-watched])').forEach(el => {
+      el.dataset.watched = '1';
+      const obs = getPhotoObserver_();
+      if (obs) obs.observe(el); else enqueuePhoto_(el);
+    });
+  }, 0);
+}
+
+function getPhotoObserver_() {
+  if (!('IntersectionObserver' in window)) return null;
+  if (!photoObserver) {
+    photoObserver = new IntersectionObserver(entries => {
+      entries.forEach(en => {
+        if (!en.isIntersecting) return;
+        photoObserver.unobserve(en.target);
+        enqueuePhoto_(en.target);
+      });
+    }, { rootMargin: '300px 0px' });
+  }
+  return photoObserver;
+}
+
+function enqueuePhoto_(el) {
+  photoQueue.push(el);
+  pumpPhotoQueue_();
+}
+
+function pumpPhotoQueue_() {
+  while (photoLoading < PHOTO_PARALLEL && photoQueue.length) {
+    const el = photoQueue.shift();
+    if (!el.isConnected) continue; // 描き直しで消えたもの
+    photoLoading++;
+    fetchPhoto(el.dataset.diary, el.dataset.file).then(dataUri => {
+      if (!el.isConnected) return;
+      el.classList.remove('loading', 'lazy-photo');
+      if (!dataUri) {
+        if (el.dataset.mode === 'replace') el.remove(); else el.classList.add('broken');
+        return;
+      }
+      const img = document.createElement('img');
+      img.src = dataUri; img.alt = '';
+      if (el.dataset.mode === 'replace') {
+        img.onclick = ev => { ev.stopPropagation(); openPhotoLightbox(img.src); };
+        el.innerHTML = '';
+        el.appendChild(img);
+      } else {
+        el.insertBefore(img, el.firstChild);
+      }
+    }).finally(() => { photoLoading--; pumpPhotoQueue_(); });
   }
 }
 
 // 権限チェック付きで1枚取得（本人・管理者・公開日記のみ許可されサーバー側で判定）
 let photoCache = {};
+let photoInflight = {}; // 同じ写真を同時に何度も取りに行かないように
 async function fetchPhoto(diaryId, fileId) {
   const cacheKey = diaryId + ':' + fileId;
   if (photoCache[cacheKey]) return photoCache[cacheKey];
-  try {
-    const res = await Auth.post({ action: 'getPhoto', token: Auth.getToken(), diaryId, fileId });
-    if (!res.success) return null;
-    const dataUri = `data:${res.mimeType};base64,${res.data}`;
-    photoCache[cacheKey] = dataUri;
-    return dataUri;
-  } catch (e) { return null; }
+  if (photoInflight[cacheKey]) return photoInflight[cacheKey];
+  photoInflight[cacheKey] = (async () => {
+    try {
+      const res = await Auth.post({ action: 'getPhoto', token: Auth.getToken(), diaryId, fileId });
+      if (!res.success) return null;
+      const dataUri = `data:${res.mimeType};base64,${res.data}`;
+      photoCache[cacheKey] = dataUri;
+      return dataUri;
+    } catch (e) { return null; }
+    finally { delete photoInflight[cacheKey]; }
+  })();
+  return photoInflight[cacheKey];
 }
 
 // sheetに保存されている形式（[{fileId,mimeType}] のJSON文字列）をパース
@@ -220,7 +288,8 @@ function renderDiaries(diaries, container) {
       </div>
       <h3 class="card-title">${escHtml(d.title)}</h3>
       ${renderPhotoGallery(d.diaryId, d.photos)}
-      <p class="card-preview">${escHtml((d.content || '').substring(0, 100))}${d.content && d.content.length > 100 ? '…' : ''}</p>
+      <p class="card-preview">${escHtml(veShortenUrls(d.content).substring(0, 100))}${veShortenUrls(d.content).length > 100 ? '…' : ''}</p>
+      ${veChipsHtml(d.content)}
       ${d.tags ? `<div class="card-tags">${d.tags.split(',').map(t=>`<span class="tag">${escHtml(t.trim())}</span>`).join('')}</div>` : ''}
       <div class="card-footer">
         <span class="stat-btn">❤️ ${d.likeCount || 0}</span>
@@ -272,7 +341,8 @@ async function openDiaryDetail(diaryId) {
         </div>
         <h2 class="modal-title">${escHtml(d.title)}</h2>
         ${renderPhotoGallery(d.diaryId, d.photos)}
-        <div class="modal-content">${escHtml(d.content).replace(/\n/g,'<br>')}</div>
+        <div class="modal-content">${veLinkify(d.content, true)}</div>
+        ${veEmbedsHtml(d.content)}
         ${d.tags ? `<div class="card-tags">${d.tags.split(',').map(t=>`<span class="tag">${escHtml(t.trim())}</span>`).join('')}</div>` : ''}
 
         <div class="like-section">
@@ -315,7 +385,7 @@ function renderComments(comments) {
         <span>${formatDate(c.createdAt)}</span>
         ${c.memberId === Auth.getMemberId() ? `<button class="btn-delete-xs" onclick="deleteComment('${escJsAttr(c.commentId)}')">削除</button>` : ''}
       </div>
-      <p>${escHtml(c.content).replace(/\n/g,'<br>')}</p>
+      <p>${veLinkify(c.content, true)}</p>
     </div>
   `).join('');
 }
@@ -374,27 +444,103 @@ async function deleteComment(commentId) {
 }
 
 // ===== マイ日記 =====
-let allMyDiaries = []; // 「同じ日」「ランダム」タブで再利用するためのキャッシュ
+let allMyDiaries = []; // 「同じ日」「ランダム」「写真」タブで再利用するためのキャッシュ
+
+// ===== マイ日記の取得（高速化） =====
+// ・前回の一覧をこのタブ内（sessionStorage）に覚えておき、開いた瞬間にまず表示 → 裏で最新に更新
+// ・ページを開いた時点で先読みしておく（タブを押したときには届いていることが多い）
+// ・同時に何度も呼ばれても通信は1回にまとめる
+// ・一覧は20件ずつ表示（残りは「もっと見る」）
+const MY_DIARIES_CACHE_KEY = 'myDiariesCache';
+const MY_DIARIES_PAGE = 20;
+let myDiariesPromise = null;
+let myDiariesShown = MY_DIARIES_PAGE;
+
+function loadMyDiariesCache_() {
+  try {
+    const o = JSON.parse(sessionStorage.getItem(MY_DIARIES_CACHE_KEY) || 'null');
+    if (o && o.memberId === Auth.getMemberId() && Array.isArray(o.diaries)) return o.diaries;
+  } catch (e) {}
+  return null;
+}
+function saveMyDiariesCache_(diaries) {
+  try {
+    sessionStorage.setItem(MY_DIARIES_CACHE_KEY, JSON.stringify({ memberId: Auth.getMemberId(), diaries }));
+  } catch (e) { /* 容量オーバー時は保存しない */ }
+}
+
+function fetchMyDiaries_() {
+  if (myDiariesPromise) return myDiariesPromise;
+  myDiariesPromise = Auth.post({ action: 'getMyDiaries', token: Auth.getToken() })
+    .then(res => {
+      if (res && res.success) {
+        allMyDiaries = res.diaries || [];
+        saveMyDiariesCache_(allMyDiaries);
+      }
+      return res;
+    })
+    .finally(() => { myDiariesPromise = null; });
+  return myDiariesPromise;
+}
+
+// ページ表示時の先読み（diary.html から呼ぶ）
+function prefetchMyDiaries() {
+  if (!Auth.isLoggedIn()) return;
+  const cached = loadMyDiariesCache_();
+  if (cached && !allMyDiaries.length) allMyDiaries = cached;
+  fetchMyDiaries_().catch(() => {});
+}
+
 async function loadMyDiaries() {
   const container = document.getElementById('my-diaries');
   if (!container) return;
-  showLoading(container, 'マイ日記を開いています...');
+  myDiariesShown = MY_DIARIES_PAGE;
+
+  // 手元にある一覧（前回分）を先に表示
+  const cached = allMyDiaries.length ? allMyDiaries : loadMyDiariesCache_();
+  let shownJson = '';
+  if (cached) {
+    allMyDiaries = cached;
+    renderMyDiaries(cached, container);
+    shownJson = JSON.stringify(cached);
+    setMyDiariesRefreshing_(true);
+  } else {
+    showLoading(container, 'マイ日記を開いています...');
+  }
+
   try {
-    const res = await Auth.post({ action: 'getMyDiaries', token: Auth.getToken() });
+    const res = await fetchMyDiaries_();
     if (res.success) {
-      allMyDiaries = res.diaries;
-      renderMyDiaries(res.diaries, container);
-    }
-    else container.innerHTML = '<p class="empty-msg">読み込みに失敗しました。</p>';
-  } catch(e) { container.innerHTML = '<p class="empty-msg">接続エラー</p>'; }
+      // 内容が変わっていなければ描き直さない（写真の再読み込みやちらつきを防ぐ）
+      if (JSON.stringify(res.diaries) !== shownJson) renderMyDiaries(res.diaries, container);
+    } else if (!cached) container.innerHTML = '<p class="empty-msg">読み込みに失敗しました。</p>';
+    else showToast(res.error || '最新の日記を取得できませんでした', 'error');
+  } catch(e) {
+    if (!cached) container.innerHTML = '<p class="empty-msg">接続エラー</p>';
+    else showToast('接続エラーのため、前回の一覧を表示しています', 'error');
+  }
+  setMyDiariesRefreshing_(false);
 }
 
-function renderMyDiaries(diaries, container) {
+function setMyDiariesRefreshing_(on) {
+  const el = document.getElementById('my-diaries-refreshing');
+  if (el) el.style.display = on ? 'inline-flex' : 'none';
+}
+
+function showMoreMyDiaries() {
+  myDiariesShown += MY_DIARIES_PAGE;
+  renderMyDiaries(allMyDiaries, document.getElementById('my-diaries'), true);
+}
+
+function renderMyDiaries(diaries, container, append = false) {
+  if (!container) return;
   if (!diaries.length) {
     container.innerHTML = '<p class="empty-msg">まだ日記がありません。最初の一筆を綴りましょう。</p>';
     return;
   }
-  container.innerHTML = diaries.map(d => `
+  const start = append ? container.querySelectorAll('.my-diary-card').length : 0;
+  const slice = diaries.slice(start, myDiariesShown);
+  const cardsHtml = slice.map(d => `
     <article class="diary-card my-diary-card" onclick="openDiaryDetail('${escJsAttr(d.diaryId)}')">
       <div class="card-header">
         <span class="card-mood">${d.mood || '😊'}</span>
@@ -403,7 +549,8 @@ function renderMyDiaries(diaries, container) {
       </div>
       <h3 class="card-title">${escHtml(d.title)}</h3>
       ${renderPhotoGallery(d.diaryId, d.photos)}
-      <p class="card-preview">${escHtml((d.content || '').substring(0,80))}…</p>
+      <p class="card-preview">${escHtml(veShortenUrls(d.content).substring(0,80))}…</p>
+      ${veChipsHtml(d.content)}
       ${d.tags ? `<div class="card-tags">${d.tags.split(',').map(t=>`<span class="tag">${escHtml(t.trim())}</span>`).join('')}</div>` : ''}
       <div class="card-footer">
         <span class="stat-btn">❤️ ${d.likeCount||0}</span>
@@ -413,6 +560,16 @@ function renderMyDiaries(diaries, container) {
       </div>
     </article>
   `).join('');
+  const rest = diaries.length - Math.min(myDiariesShown, diaries.length);
+  const moreHtml = rest > 0
+    ? `<div class="my-more-wrap"><button type="button" class="btn-primary my-more-btn" onclick="showMoreMyDiaries()">もっと見る（残り${rest}件）</button></div>`
+    : '';
+  if (append) {
+    container.querySelector('.my-more-wrap')?.remove();
+    container.insertAdjacentHTML('beforeend', cardsHtml + moreHtml);
+  } else {
+    container.innerHTML = cardsHtml + moreHtml;
+  }
 }
 
 // ===== 日記投稿 =====
@@ -431,6 +588,7 @@ async function submitDiary(e) {
     if (res.success) {
       showToast('日記を投稿しました ✨');
       document.getElementById('diary-form').reset();
+      document.getElementById('diary-content').dispatchEvent(new Event('change')); // 動画プレビューを消す
       postPhotos = [];
       renderPhotoPreview('post');
       loadMyDiaries();
@@ -451,6 +609,8 @@ function openEditModal(diaryId) {
   modal.dataset.diaryId = diaryId;
   document.getElementById('edit-title').value   = diary.title || '';
   document.getElementById('edit-content').value = diary.content || '';
+  veBindFormPreview('edit-content', 'edit-video-preview');
+  document.getElementById('edit-content').dispatchEvent(new Event('change'));
   document.getElementById('edit-mood').value    = diary.mood || '😊';
   document.getElementById('edit-tags').value    = diary.tags || '';
   document.getElementById('edit-public').checked = diary.isPublic === true; // 不明な場合は非公開扱い
@@ -499,11 +659,16 @@ async function deleteDiary(diaryId) {
 
 // ===== 自分の日記キャッシュを確実に用意する（「同じ日」「ランダム」タブ共通） =====
 async function ensureMyDiaries(force = false) {
+  if (!force && !allMyDiaries.length) {
+    const cached = loadMyDiariesCache_();
+    if (cached && cached.length) {
+      allMyDiaries = cached;
+      fetchMyDiaries_().catch(() => {}); // 裏で最新に更新
+      return allMyDiaries;
+    }
+  }
   if (force || !allMyDiaries.length) {
-    try {
-      const res = await Auth.post({ action: 'getMyDiaries', token: Auth.getToken() });
-      if (res.success) allMyDiaries = res.diaries || [];
-    } catch (e) { /* 呼び出し側で0件表示になる */ }
+    try { await fetchMyDiaries_(); } catch (e) { /* 呼び出し側で0件表示になる */ }
   }
   return allMyDiaries;
 }
@@ -554,18 +719,7 @@ let rcGallerySeq = 0;
 function rcGalleryHtml_(d) {
   const list = parsePhotos(d.photos);
   if (!list.length) return '';
-  const prefix = `rcg${++rcGallerySeq}`;
-  setTimeout(async () => {
-    for (let i = 0; i < list.length; i++) {
-      const el = document.getElementById(`${prefix}-${i}`);
-      if (!el) continue;
-      const dataUri = await fetchPhoto(d.diaryId, list[i].fileId);
-      if (!dataUri) { el.remove(); continue; }
-      el.classList.remove('loading');
-      el.innerHTML = `<img src="${dataUri}" alt="" onclick="event.stopPropagation();openPhotoLightbox(this.src)">`;
-    }
-  }, 0);
-  return `<div class="rc-photos">${list.map((_, i) => `<div class="rc-photo loading" id="${prefix}-${i}"></div>`).join('')}</div>`;
+  return `<div class="rc-photos">${list.map(p => lazyPhotoHtml_('rc-photo', d.diaryId, p.fileId, 'replace')).join('')}</div>`;
 }
 
 // 日記1件の中身（タイトル・本文・写真）
@@ -573,7 +727,8 @@ function rcDiaryContentHtml_(d) {
   return `
     <div class="rc-diary" onclick="event.stopPropagation();openDiaryDetail('${escJsAttr(d.diaryId)}')">
       <div class="rc-diary-title">${escHtml(d.title)}${d.isPublic ? '' : ' <span class="rc-lock">🔒</span>'}</div>
-      <div class="rc-diary-body">${escHtml(d.content || '')}</div>
+      <div class="rc-diary-body">${veLinkify(d.content)}</div>
+      ${veEmbedsHtml(d.content)}
       ${rcGalleryHtml_(d)}
       ${d.tags ? `<div class="card-tags">${d.tags.split(',').filter(t => t.trim()).map(t => `<span class="tag">${escHtml(t.trim())}</span>`).join('')}</div>` : ''}
     </div>`;
@@ -817,12 +972,6 @@ function renderRecallSidebar_(mode = 'diary') {
 }
 
 // ===== 写真（年月ごとに写真を並べる） =====
-// 写真はGAS経由で1枚ずつ取得するため、画面に見えてきたものから順に読み込む
-let photoObserver = null;
-let photoQueue = [];
-let photoLoading = 0;
-const PHOTO_PARALLEL = 3;
-
 async function renderPhotosTab() {
   const container = document.getElementById('photos-container');
   if (!container) return;
@@ -856,52 +1005,14 @@ async function renderPhotosTab() {
         <div class="ph-grid">
           ${byMonth[ym].map(it => {
             const day = Number(it.key.slice(8, 10));
-            return `<button type="button" class="ph-cell loading" id="ph-${++seq}" data-key="${it.key}"
-                      data-diary="${escHtml(it.diaryId)}" data-file="${escHtml(it.fileId)}"
-                      onclick="openDiaryDetail(this.dataset.diary)" title="${it.key}">
-                      <span class="ph-day">${day}</span></button>`;
+            return lazyPhotoHtml_('ph-cell', it.diaryId, it.fileId, 'prepend',
+              `<span class="ph-day">${day}</span>`,
+              `data-key="${it.key}" title="${it.key}" role="button" tabindex="0" onclick="openDiaryDetail(this.dataset.diary)"`);
           }).join('')}
         </div>
       </section>`;
   }).join('');
 
-  setupPhotoLazyLoad_(container);
-}
-
-function setupPhotoLazyLoad_(container) {
-  if (photoObserver) photoObserver.disconnect();
-  photoQueue = [];
-  const cells = container.querySelectorAll('.ph-cell.loading');
-  if (!('IntersectionObserver' in window)) { cells.forEach(enqueuePhoto_); return; }
-  photoObserver = new IntersectionObserver(entries => {
-    entries.forEach(en => {
-      if (!en.isIntersecting) return;
-      photoObserver.unobserve(en.target);
-      enqueuePhoto_(en.target);
-    });
-  }, { rootMargin: '300px 0px' });
-  cells.forEach(c => photoObserver.observe(c));
-}
-
-function enqueuePhoto_(cell) {
-  photoQueue.push(cell);
-  pumpPhotoQueue_();
-}
-
-function pumpPhotoQueue_() {
-  while (photoLoading < PHOTO_PARALLEL && photoQueue.length) {
-    const cell = photoQueue.shift();
-    if (!cell.isConnected) continue; // 描き直しで消えたもの
-    photoLoading++;
-    fetchPhoto(cell.dataset.diary, cell.dataset.file).then(dataUri => {
-      if (!cell.isConnected) return;
-      cell.classList.remove('loading');
-      if (!dataUri) { cell.classList.add('broken'); return; }
-      const img = document.createElement('img');
-      img.src = dataUri; img.alt = '';
-      cell.insertBefore(img, cell.firstChild);
-    }).finally(() => { photoLoading--; pumpPhotoQueue_(); });
-  }
 }
 
 function photoScrollToMonth(y, m) {
@@ -985,7 +1096,7 @@ async function renderTimeline() {
               <div class="timeline-date">${formatDate(d.createdAt)}</div>
               <div class="timeline-mood">${d.mood || '😊'}</div>
               <div class="timeline-title">${escHtml(d.title)}</div>
-              <div class="timeline-preview">${escHtml((d.content||'').substring(0,80))}…</div>
+              <div class="timeline-preview">${escHtml(veShortenUrls(d.content).substring(0,80))}…</div>
             </div>
           `).join('')}
         </div>

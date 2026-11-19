@@ -36,6 +36,10 @@
       border-radius:8px; padding:0.75rem 0.9rem; font-size:0.9rem; color: var(--sepia);
       white-space:pre-wrap; line-height:1.7;
     }
+    .ai-model-picker { margin:1rem 0 0.75rem; text-align:left; }
+    .ai-model-picker label { display:block; font-size:0.8rem; color:#8a7862; margin-bottom:0.3rem; }
+    .ai-model-picker select { width:100%; padding:0.5rem; border:1px solid #c9b99a; border-radius:8px; background:#fffdf7; color: var(--brown); font-size:0.9rem; }
+    .ai-model-hint { font-size:0.72rem; color:#a08c74; margin-top:0.3rem; line-height:1.5; }
     .voice-transcript-raw { background:#f5f0e6; color:#8a7862; font-size:0.82rem; }
     /* ===== 同じ日／ランダム ===== */
     .rc-layout { display:grid; grid-template-columns: minmax(0,1fr) 260px; gap:1.25rem; align-items:start; }
@@ -430,6 +434,11 @@
           <h3>📷 写真から</h3>
           <p>手書きの日記帳・紙の10年日記・日記アプリの画面のスクリーンショットをAIが読み取ります。1枚に何日分・何年分あっても分けて読み取ります。</p>
           <label class="im-check"><input type="checkbox" id="im-attach-original"> 読み取った写真も日記に添付する</label>
+          <div class="ai-model-picker">
+            <label for="im-model-select">AIモデル</label>
+            <select id="im-model-select" class="ai-model-select"></select>
+            <div class="ai-model-hint">選んだモデルが使えない時は、汎用の最新モデルに自動で切り替わります</div>
+          </div>
           <label class="btn-primary im-file-btn">写真を選ぶ
             <input type="file" accept="image/*" multiple hidden onchange="imHandleImages(event)">
           </label>
@@ -514,6 +523,11 @@
       <div class="voice-transcript-box">
         <label>聞き取り中の内容</label>
         <div id="voice-transcript" class="voice-transcript"></div>
+      </div>
+      <div class="ai-model-picker">
+        <label for="voice-model-select">AIモデル</label>
+        <select id="voice-model-select" class="ai-model-select"></select>
+        <div class="ai-model-hint">選んだモデルが使えない時は、汎用の最新モデルに自動で切り替わります</div>
       </div>
     </div>
 

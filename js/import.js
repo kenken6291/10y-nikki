@@ -293,7 +293,7 @@ async function imHandleImages(e) {
   const attach = document.getElementById('im-attach-original').checked;
   const status = document.getElementById('im-photo-status');
   imBusy = true;
-  let added = 0, failed = 0;
+  let added = 0, failed = 0, fbShown = false;
   for (let i = 0; i < files.length; i++) {
     const file = files[i];
     status.innerHTML = `<span class="loading-spinner"></span> 写真を読み取っています（${i + 1} / ${files.length}）… ${escHtml(file.name)}`;
@@ -302,10 +302,13 @@ async function imHandleImages(e) {
       const res = await imPost_({
         action: 'parseDiaryImage', token: Auth.getToken(),
         image: img.data, mimeType: img.mimeType,
+        model: AiModel.get(),
         defaultYear: imDefaultYear_(),
         hintDate: imDateFromFilename_(file.name)
       }, 120000, 1);
       if (!res.success) throw new Error(res.error || '読み取りに失敗しました');
+      const fbNote = AiModel.fallbackNote(res);
+      if (fbNote && !fbShown) { fbShown = true; showToast(fbNote); }
       const entries = (res.entries || []).map(en => {
         const dt = imParseDate_(en.date, imDefaultYear_());
         return imMakeItem_({

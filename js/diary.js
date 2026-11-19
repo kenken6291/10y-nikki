@@ -1384,7 +1384,7 @@ async function runVoiceFormatting_(rawText) {
   document.getElementById('voice-step-record').style.display = 'none';
   document.getElementById('voice-step-loading').style.display = 'block';
   try {
-    const res = await Auth.post({ action: 'formatVoiceDiary', token: Auth.getToken(), rawText });
+    const res = await Auth.post({ action: 'formatVoiceDiary', token: Auth.getToken(), rawText, model: AiModel.get() });
     document.getElementById('voice-step-loading').style.display = 'none';
     if (res.success) {
       document.getElementById('voice-result-title').value   = res.title || '';
@@ -1397,6 +1397,8 @@ async function runVoiceFormatting_(rawText) {
       });
       document.getElementById('voice-raw-transcript').textContent = voiceRawTranscript;
       document.getElementById('voice-step-confirm').style.display = 'block';
+      const fbNote = AiModel.fallbackNote(res);
+      if (fbNote) showToast(fbNote);
     } else {
       showToast(res.error || 'AIによる整形に失敗しました', 'error');
       document.getElementById('voice-step-record').style.display = 'block';

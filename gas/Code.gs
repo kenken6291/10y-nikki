@@ -992,20 +992,22 @@ function handleFormatVoiceDiary_(p, sess) {
   if (rawText.length > 4000) return jsonRes({success: false, error: '内容が長すぎます'});
 
   try {
-    const formatted = formatDiaryWithGemini_(rawText);
+    const formatted = formatDiaryWithGemini_(rawText, p.model);
     return jsonRes({
       success: true,
       title:   formatted.title,
       content: formatted.content,
       mood:    formatted.mood,
-      tags:    formatted.tags
+      tags:    formatted.tags,
+      model:   formatted.model,
+      fallback: formatted.fallback
     });
   } catch (err) {
     return jsonRes({success: false, error: 'AIによる整形に失敗しました: ' + err.message});
   }
 }
 
-function formatDiaryWithGemini_(rawText) {
+function formatDiaryWithGemini_(rawText, requestedModel) {
   const prompt = [
     '以下は日記アプリのユーザーが音声で話した内容の文字起こしです。',
     'フィラー（えーと、あのー、まあ 等）や言い淀み、意味のない繰り返しを取り除き、',
@@ -1016,73 +1018,130 @@ function formatDiaryWithGemini_(rawText) {
     rawText
   ].join('\n');
 
-  const parsed = callGeminiJson_([{ text: prompt }]).data;
+  const result = callGeminiJson_([{ text: prompt }], requestedModel);
+  const parsed = result.data;
 
   const allowedMoods = ['😊', '😢', '😤', '😴', '🤔'];
   return {
     title:   (parsed.title   || '').toString().trim().slice(0, 100) || '今日の日記',
     content: (parsed.content || rawText).toString().trim(),
     mood:    allowedMoods.indexOf(parsed.mood) !== -1 ? parsed.mood : '😊',
-    tags:    (parsed.tags    || '').toString().trim()
+    tags:    (parsed.tags    || '').toString().trim(),
+    model:   result.model,
+    fallback: result.fallback
   };
 }
 
 /**
- * ===== Gemini 共通呼び出し =====
- * スクリプトプロパティ GEMINI_MODEL があればそのモデルを最優先で使い、
- * 失敗（モデル廃止・利用上限・一時エラー）したら次のモデルで自動的にやり直す。
- * Gemini 3系では temperature 等は無視されるため指定しない。思考レベルは low（速さ優先）。
- * @param {Array} parts  [{text}, {inline_data:{mime_type,data}}] の配列
- * @return {{data:Object, model:string}} JSONとして解析した回答と使ったモデル名
+ * ===== Gemini 共通呼び出し（2026年11月版：Gemini 4 対応） =====
+ * 使うモデルの優先順位：
+ *   1. 画面の「AIモデル」で選ばれたモデル（p.model）
+ *   2. スクリプトプロパティ GEMINI_MODEL（任意）
+ *   3. 汎用の最新モデル GEMINI_FALLBACK_MODELS を先頭から順に
+ * 失敗（モデル廃止・名前違い・利用上限・一時エラー）したら次のモデルで自動的にやり直す。
+ * 混雑（429/500/503）は同じモデルで少し待って再試行してから次へ進む。
+ * Gemini 3系以降では temperature 等は指定しない。思考レベルは low（速さ優先）。
+ *
+ *   gemini-flash-latest : Googleが常に最新の汎用モデルへ自動で差し替えるエイリアス
+ *   gemini-4-hydrogen   : 2026年11月時点の汎用最新モデル（「日々の暮らしをサポート」）
+ *   gemini-3.8-flash    : 保険
+ *   gemini-3.5-flash-lite : 最終的な保険（軽量）
  */
-const GEMINI_DEFAULT_MODELS = ['gemini-3.8-flash', 'gemini-3.5-flash-lite', 'gemini-flash-latest'];
+const GEMINI_FALLBACK_MODELS = ['gemini-flash-latest', 'gemini-4-hydrogen', 'gemini-3.8-flash', 'gemini-3.5-flash-lite'];
+const GEMINI_MODEL_PATTERN = /^gemini-[a-z0-9][a-z0-9.\-]{0,60}$/;
+const GEMINI_RETRY_CODES = [429, 500, 503];
+const GEMINI_MAX_ATTEMPTS = 2;
 
-function callGeminiJson_(parts) {
+function normalizeGeminiModel_(m) {
+  const v = String(m || '').trim().toLowerCase();
+  return GEMINI_MODEL_PATTERN.test(v) ? v : '';
+}
+
+/**
+ * @param {Array}  parts           [{text}, {inline_data:{mime_type,data}}] の配列
+ * @param {string} requestedModel  画面で選ばれたモデルID（'' = 自動）
+ * @return {{data:Object, model:string, requestedModel:string, fallback:boolean}}
+ */
+function callGeminiJson_(parts, requestedModel) {
   const props = PropertiesService.getScriptProperties();
   const apiKey = props.getProperty('GEMINI_API_KEY');
   if (!apiKey) throw new Error('GEMINI_API_KEYが設定されていません');
 
-  const models = [props.getProperty('GEMINI_MODEL')].concat(GEMINI_DEFAULT_MODELS)
+  const requested = normalizeGeminiModel_(requestedModel);
+  const models = [requested, normalizeGeminiModel_(props.getProperty('GEMINI_MODEL'))]
+    .concat(GEMINI_FALLBACK_MODELS)
     .filter(function(m, i, arr) { return m && arr.indexOf(m) === i; });
 
   let lastErr = '';
   for (let i = 0; i < models.length; i++) {
     const model = models[i];
     const generationConfig = { responseMimeType: 'application/json' };
-    if (/^gemini-3/.test(model)) generationConfig.thinkingConfig = { thinkingLevel: 'low' };
+    // Gemini 3系・4系は思考レベル指定に対応（2.x系には付けない）
+    if (/^gemini-[34]/.test(model)) generationConfig.thinkingConfig = { thinkingLevel: 'low' };
+    const payload = JSON.stringify({ contents: [{ parts: parts }], generationConfig: generationConfig });
 
-    let res;
-    try {
-      res = UrlFetchApp.fetch(
-        'https://generativelanguage.googleapis.com/v1beta/models/' + model + ':generateContent', {
-          method: 'post',
-          contentType: 'application/json',
-          headers: { 'x-goog-api-key': apiKey },
-          payload: JSON.stringify({ contents: [{ parts: parts }], generationConfig: generationConfig }),
-          muteHttpExceptions: true
-        });
-    } catch (err) { lastErr = '通信エラー: ' + err.message; continue; }
+    let code = 0, text = '';
+    for (let attempt = 1; attempt <= GEMINI_MAX_ATTEMPTS; attempt++) {
+      try {
+        const res = UrlFetchApp.fetch(
+          'https://generativelanguage.googleapis.com/v1beta/models/' + encodeURIComponent(model) + ':generateContent', {
+            method: 'post',
+            contentType: 'application/json',
+            headers: { 'x-goog-api-key': apiKey },
+            payload: payload,
+            muteHttpExceptions: true
+          });
+        code = res.getResponseCode();
+        text = res.getContentText();
+      } catch (err) {
+        code = 0; text = '通信エラー: ' + err.message;
+      }
+      if (code === 200) break;
+      if (GEMINI_RETRY_CODES.indexOf(code) === -1 || attempt === GEMINI_MAX_ATTEMPTS) break;
+      Utilities.sleep(1500 * attempt);
+    }
 
-    const code = res.getResponseCode();
     if (code !== 200) {
       lastErr = code === 429 ? 'AIの利用回数の上限に達しました。しばらくしてからお試しください'
-              : code === 404 ? 'モデル ' + model + ' が見つかりません'
+              : (code === 404 || (code === 400 && /not found|not supported|NOT_FOUND|unknown model|invalid model/i.test(text)))
+                ? 'モデル ' + model + ' が見つかりません'
+              : code === 0 ? text
               : 'Gemini APIエラー (' + code + ')';
-      console.warn('Gemini ' + model + ': ' + code + ' ' + res.getContentText().substring(0, 300));
+      console.warn('Gemini ' + model + ': ' + code + ' ' + String(text).substring(0, 300));
       continue;
     }
     try {
-      const json = JSON.parse(res.getContentText());
+      const json = JSON.parse(text);
       // 思考部分（thought:true）を除いた回答本文だけをつなぐ
-      const text = json.candidates[0].content.parts
+      const answer = json.candidates[0].content.parts
         .filter(function(x) { return !x.thought; })
         .map(function(x) { return x.text || ''; }).join('');
-      return { data: JSON.parse(text.replace(/```json|```/g, '').trim()), model: model };
+      return {
+        data: JSON.parse(answer.replace(/```json|```/g, '').trim()),
+        model: model,
+        requestedModel: requested,
+        fallback: !!requested && model !== requested
+      };
     } catch (err) {
       lastErr = 'AIの応答を解析できませんでした';
+      console.warn('Gemini ' + model + ' parse error: ' + err.message);
     }
   }
   throw new Error(lastErr || 'AIの呼び出しに失敗しました');
+}
+
+/** スクリプトエディタから手動実行して、各モデルが使えるか確認する（ログに結果） */
+function testGeminiModels() {
+  const list = ['gemini-4-hydrogen', 'gemini-4-neon', 'gemini-4-carbon', 'gemini-4-argon',
+                'gemini-3.8-flash', 'gemini-3.5-flash', 'gemini-flash-latest'];
+  list.forEach(function(m) {
+    try {
+      const r = callGeminiJson_([{ text: '{"ok":true} というJSONだけを返してください' }], m);
+      Logger.log(m + ' → ' + (r.fallback ? '使えないため ' + r.model + ' に切替' : 'OK'));
+    } catch (err) {
+      Logger.log(m + ' → 失敗: ' + err.message);
+    }
+  });
 }
 
 /**
@@ -1347,7 +1406,7 @@ function handleParseDiaryImage_(p, sess) {
     const result = callGeminiJson_([
       { text: prompt },
       { inline_data: { mime_type: mimeType, data: p.image } }
-    ]);
+    ], p.model);
     const entries = (result.data.entries || []).map(function(en) {
       return {
         date: String(en.date || ''),
@@ -1357,7 +1416,7 @@ function handleParseDiaryImage_(p, sess) {
         tags: Array.isArray(en.tags) ? en.tags.join(',') : String(en.tags || '')
       };
     }).filter(function(en) { return en.content || en.title; });
-    return jsonRes({success: true, entries: entries, model: result.model});
+    return jsonRes({success: true, entries: entries, model: result.model, fallback: result.fallback});
   } catch (err) {
     return jsonRes({success: false, error: '写真の読み取りに失敗しました: ' + err.message});
   }

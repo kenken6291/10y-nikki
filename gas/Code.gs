@@ -488,6 +488,20 @@ function updateDiary(p, sess) {
       if (p.tags     !== undefined) sheet.getRange(i+1,7).setValue(p.tags);
       if (p.isPublic !== undefined) sheet.getRange(i+1,8).setValue(p.isPublic);
 
+      // 日付の変更（YYYY-MM-DD）：時刻は元の値を保ち、日付だけ差し替える
+      if (p.date !== undefined && p.date !== '') {
+        const date = String(p.date);
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return jsonRes({error: '日付が不正です'});
+        const tz = Session.getScriptTimeZone();
+        const todayStr = Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd');
+        if (date > todayStr) return jsonRes({error: '未来の日付にはできません'});
+        const old = new Date(data[i][8]);
+        const time = isNaN(old) ? '12:00:00' : Utilities.formatDate(old, tz, 'HH:mm:ss');
+        const created = Utilities.parseDate(date + ' ' + time, tz, 'yyyy-MM-dd HH:mm:ss');
+        if (Utilities.formatDate(created, tz, 'yyyy-MM-dd') !== date) return jsonRes({error: '存在しない日付です'});
+        sheet.getRange(i+1,9).setValue(created.toISOString());
+      }
+
       // 写真：既存のうち残す分（existingPhotos＝fileIdの配列）＋ 新規アップロード分
       const oldPhotoList = photosFromJson_(data[i][10]);
       const keepIds = p.existingPhotos || [];

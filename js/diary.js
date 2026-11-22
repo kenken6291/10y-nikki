@@ -771,6 +771,14 @@ function openEditModal(diaryId) {
   if (!modal) return;
   modal.dataset.diaryId = diaryId;
   document.getElementById('edit-title').value   = diary.title || '';
+  // 日付（端末ローカルの YYYY-MM-DD）。変更されたときだけ送信するため元の値も保持
+  const origDate = diary.createdAt ? localDateKey_(diary.createdAt) : '';
+  const dateEl = document.getElementById('edit-date');
+  if (dateEl) {
+    dateEl.value = origDate;
+    dateEl.max = localDateKey_(new Date().toISOString()); // 未来の日付は不可
+  }
+  modal.dataset.origDate = origDate;
   document.getElementById('edit-content').value = diary.content || '';
   veBindFormPreview('edit-content', 'edit-video-preview');
   document.getElementById('edit-content').dispatchEvent(new Event('change'));
@@ -792,12 +800,20 @@ async function submitEdit() {
   const mood    = document.getElementById('edit-mood').value;
   const tags    = document.getElementById('edit-tags').value.trim();
   const isPublic = document.getElementById('edit-public').checked;
+  const dateEl  = document.getElementById('edit-date');
+  const date    = dateEl ? dateEl.value : '';
+  if (!title || !content) { showToast('タイトルと本文は必須です', 'error'); return; }
+  if (dateEl && !date) { showToast('日付を入力してください', 'error'); return; }
+  if (date && date > localDateKey_(new Date().toISOString())) { showToast('未来の日付にはできません', 'error'); return; }
+  const payload = {
+    action: 'updateDiary', token: Auth.getToken(), diaryId, title, content, mood, tags, isPublic,
+    existingPhotos: editExistingPhotos.map(p => p.fileId), // 残す既存写真のfileId一覧
+    photos: editPhotos                                     // 新規追加する写真（base64）
+  };
+  // 日付が変更されたときだけ送る（時刻は元のまま、日付だけ差し替え）
+  if (date && date !== modal.dataset.origDate) payload.date = date;
   try {
-    const res = await Auth.post({
-      action: 'updateDiary', token: Auth.getToken(), diaryId, title, content, mood, tags, isPublic,
-      existingPhotos: editExistingPhotos.map(p => p.fileId), // 残す既存写真のfileId一覧
-      photos: editPhotos                                     // 新規追加する写真（base64）
-    });
+    const res = await Auth.post(payload);
     if (res.success) {
       showToast('日記を更新しました');
       modal.style.display = 'none';

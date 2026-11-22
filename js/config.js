@@ -1,4 +1,10 @@
 // ★ デプロイ後にGASのURLを貼り付けてください
+// ★ 画面側のバージョン（ファイルを更新したら数字と日付を上げる）
+//   GAS側の GAS_VERSION と揃えておくと、画面右下の表示で反映漏れがすぐ分かる
+const APP_VERSION = '3.1.0';
+const APP_VERSION_DATE = '2026-11-23';
+const APP_VERSION_NOTE = '日記の日付修正に対応';
+
 const GAS_URL = 'https://script.google.com/macros/s/AKfycbyYqcZEW76V7JyHqoF8NdZh_7prmEMu0mZjwgYpa4SeCAIbOQd7sP38W639VXKM0oEJmg/exec';
 
 // ============================================================
@@ -58,3 +64,53 @@ const AiModel = {
   }
 };
 document.addEventListener('DOMContentLoaded', () => AiModel.init());
+
+// ============================================================
+// バージョン情報表示（全ページ共通・画面右下）
+//   画面 vX.X.X ／ GAS vX.X.X を表示。GASが古い・違う場合は赤色で警告
+//   タップで詳細（更新日・内容・GAS URL末尾）を表示
+// ============================================================
+const VersionInfo = {
+  gas: null,
+  async init() {
+    const el = document.createElement('div');
+    el.id = 'version-badge';
+    el.style.cssText = 'position:fixed;right:8px;bottom:8px;z-index:9999;font-size:11px;' +
+      'padding:3px 8px;border-radius:10px;background:rgba(0,0,0,.55);color:#fff;cursor:pointer;' +
+      'font-family:sans-serif;line-height:1.4;user-select:none;';
+    el.textContent = '画面 v' + APP_VERSION + ' ／ GAS 確認中…';
+    el.title = 'タップで詳細';
+    el.addEventListener('click', () => this.showDetail());
+    document.body.appendChild(el);
+
+    try {
+      const url = new URL(GAS_URL);
+      url.searchParams.append('action', 'getVersion');
+      url.searchParams.append('_ts', Date.now());
+      const res = await fetch(url.toString()).then(r => r.json());
+      this.gas = (res && res.version) ? res : { version: '', error: '旧バージョン（getVersion未対応）' };
+    } catch (e) {
+      this.gas = { version: '', error: '接続できません' };
+    }
+    const ok = this.gas.version === APP_VERSION;
+    el.textContent = '画面 v' + APP_VERSION + ' ／ GAS ' + (this.gas.version ? 'v' + this.gas.version : '旧版');
+    el.style.background = ok ? 'rgba(0,0,0,.55)' : 'rgba(200,30,30,.9)';
+    if (!ok) el.title = 'GASのバージョンが画面と違います。GASを「新しいバージョン」で再デプロイしてください';
+  },
+  showDetail() {
+    const g = this.gas || {};
+    const lines = [
+      '【画面】 v' + APP_VERSION + '（' + APP_VERSION_DATE + '）',
+      '　' + APP_VERSION_NOTE,
+      '【GAS】 ' + (g.version ? 'v' + g.version + '（' + (g.date || '') + '）' : (g.error || '確認中')),
+      g.note ? '　' + g.note : '',
+      '【GAS URL】 …' + GAS_URL.replace(/\/exec$/, '').slice(-12),
+      '',
+      (g.version && g.version === APP_VERSION)
+        ? '✅ 画面とGASのバージョンは一致しています'
+        : '⚠️ 一致していません。\n・GAS：デプロイを管理→編集→新しいバージョン→デプロイ\n・画面：GitHubへ反映後、強制再読み込み（Ctrl+Shift+R）'
+    ].filter(x => x !== '');
+    alert(lines.join('\n'));
+  }
+};
+document.addEventListener('DOMContentLoaded', () => VersionInfo.init());

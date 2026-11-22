@@ -5,10 +5,16 @@
 //   （[プロジェクトの設定] → [スクリプト プロパティ]）
 const SESSION_EXPIRE_HOURS = 24;
 
+// ★ GAS側のバージョン（画面側 js/config.js の APP_VERSION と揃える）
+const GAS_VERSION = '3.1.0';
+const GAS_VERSION_DATE = '2026-11-23';
+const GAS_VERSION_NOTE = '日記の日付修正に対応';
+
 // ===== ルーター =====
 function doGet(e) {
   try {
     const action = e.parameter.action;
+    if (action === 'getVersion')       return jsonRes({version: GAS_VERSION, date: GAS_VERSION_DATE, note: GAS_VERSION_NOTE});
     if (action === 'getDiaries')       return getDiaries(e);
     if (action === 'getDiaryDetail')   return getDiaryDetail(e);
     if (action === 'getEvents')        return getEvents(e);
